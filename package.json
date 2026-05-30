@@ -1,0 +1,23 @@
+{
+  "name": "ringcentral-call-review-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot that analyzes RingCentral calls and provides AI-powered feedback",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "telegraf": "^4.16.3",
+    "openai": "^4.52.7",
+    "better-sqlite3": "^12.10.0",
+    "node-cron": "^3.0.3",
+    "axios": "^1.7.3",
+    "form-data": "^4.0.0",
+    "dotenv": "^16.4.5",
+    "dayjs": "^1.11.12",
+    "winston": "^3.13.0",
+    "fs-extra": "^11.2.0"
+  }
+}

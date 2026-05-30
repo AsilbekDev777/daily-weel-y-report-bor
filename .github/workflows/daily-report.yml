@@ -1,0 +1,79 @@
+name: 🏁 End-of-Shift Daily Report
+
+on:
+  schedule:
+    # 7:00 PM CT = 00:00 UTC (CDT, summer) or 01:00 UTC (CST, winter)
+    # Run both times to cover DST transitions
+    - cron: '0 0 * * 2-7'   # Mon-Sat midnight UTC (7 PM CDT)
+    - cron: '0 1 * * 2-7'   # Mon-Sat 1 AM UTC (7 PM CST)
+
+  workflow_dispatch:
+    inputs:
+      date_override:
+        description: 'Date to report (YYYY-MM-DD, leave empty for today CT)'
+        required: false
+        default: ''
+
+jobs:
+  daily-report:
+    name: Generate & Send Daily Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Restore database cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ./data/bot.sqlite
+          key: db-${{ github.run_id }}
+          restore-keys: |
+            db-
+
+      - name: Run daily report
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_ANALYSIS_MODEL: ${{ secrets.OPENAI_ANALYSIS_MODEL || 'gpt-4o-mini' }}
+          RC_SERVER_URL: ${{ secrets.RC_SERVER_URL || 'https://platform.ringcentral.com' }}
+          RC_CLIENT_ID: ${{ secrets.RC_CLIENT_ID }}
+          RC_CLIENT_SECRET: ${{ secrets.RC_CLIENT_SECRET }}
+          RC_JWT: ${{ secrets.RC_JWT }}
+          DATABASE_PATH: ./data/bot.sqlite
+          DOWNLOAD_DIR: ./data/recordings
+          RC_REQUESTS_PER_MINUTE: '4'
+          RC_PER_PAGE: '100'
+          RC_MAX_PAGES: '10'
+          DEBUG_MODE: 'false'
+          GH_ACTIONS_MODE: 'true'
+          ADMIN_TELEGRAM_IDS: ${{ secrets.ADMIN_TELEGRAM_IDS }}
+          DATE_OVERRIDE: ${{ github.event.inputs.date_override }}
+        run: node scripts/gh-daily.js
+
+      - name: Save database cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ./data/bot.sqlite
+          key: db-${{ github.run_id }}
+          restore-keys: |
+            db-
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-error-logs-${{ github.run_id }}
+          path: ./data/logs/
+          retention-days: 7

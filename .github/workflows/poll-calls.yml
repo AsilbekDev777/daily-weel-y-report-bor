@@ -1,0 +1,114 @@
+name: 📞 Poll & Analyze Calls
+
+on:
+  schedule:
+    # Every 30 min, Mon-Sat, 14:00-00:00 UTC = 9:00 AM - 7:00 PM CT (CDT UTC-5)
+    # During CST (UTC-6) winter: 15:00-01:00 UTC
+    # We run broadly 14:00-01:00 UTC and let the script check shift hours itself
+    - cron: '0,30 14-23 * * 1-6'
+    - cron: '0,30 0 * * 2-7'
+
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode'
+        required: true
+        default: 'poll'
+        type: choice
+        options:
+          - poll
+          - daily
+          - weekly
+          - backfill
+
+jobs:
+  poll-calls:
+    name: Poll & Analyze Calls
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run poll job
+        if: github.event_name == 'schedule' || github.event.inputs.mode == 'poll'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_ANALYSIS_MODEL: ${{ secrets.OPENAI_ANALYSIS_MODEL || 'gpt-4o-mini' }}
+          OPENAI_TRANSCRIPTION_MODEL: ${{ secrets.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe' }}
+          RC_SERVER_URL: ${{ secrets.RC_SERVER_URL || 'https://platform.ringcentral.com' }}
+          RC_CLIENT_ID: ${{ secrets.RC_CLIENT_ID }}
+          RC_CLIENT_SECRET: ${{ secrets.RC_CLIENT_SECRET }}
+          RC_JWT: ${{ secrets.RC_JWT }}
+          DATABASE_PATH: ./data/bot.sqlite
+          DOWNLOAD_DIR: ./data/recordings
+          LOOKBACK_MINUTES: '45'
+          MAX_ANALYZE_PER_SYNC: '4'
+          MIN_CALL_DURATION_SECONDS: '15'
+          MAX_AUDIO_MB: '25'
+          RC_REQUESTS_PER_MINUTE: '4'
+          RC_PER_PAGE: '100'
+          RC_MAX_PAGES: '10'
+          OPENAI_DELAY_MS: '5000'
+          DEBUG_MODE: 'false'
+          GH_ACTIONS_MODE: 'true'
+          ADMIN_TELEGRAM_IDS: ${{ secrets.ADMIN_TELEGRAM_IDS }}
+        run: node scripts/gh-poll.js
+
+      - name: Run backfill
+        if: github.event.inputs.mode == 'backfill'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_ANALYSIS_MODEL: ${{ secrets.OPENAI_ANALYSIS_MODEL || 'gpt-4o-mini' }}
+          OPENAI_TRANSCRIPTION_MODEL: ${{ secrets.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe' }}
+          RC_SERVER_URL: ${{ secrets.RC_SERVER_URL || 'https://platform.ringcentral.com' }}
+          RC_CLIENT_ID: ${{ secrets.RC_CLIENT_ID }}
+          RC_CLIENT_SECRET: ${{ secrets.RC_CLIENT_SECRET }}
+          RC_JWT: ${{ secrets.RC_JWT }}
+          DATABASE_PATH: ./data/bot.sqlite
+          DOWNLOAD_DIR: ./data/recordings
+          LOOKBACK_MINUTES: '45'
+          MAX_ANALYZE_PER_SYNC: '10'
+          MIN_CALL_DURATION_SECONDS: '15'
+          MAX_AUDIO_MB: '25'
+          RC_REQUESTS_PER_MINUTE: '4'
+          RC_PER_PAGE: '100'
+          RC_MAX_PAGES: '10'
+          OPENAI_DELAY_MS: '5000'
+          DEBUG_MODE: 'true'
+          GH_ACTIONS_MODE: 'true'
+          BACKFILL_DAYS: '7'
+          ADMIN_TELEGRAM_IDS: ${{ secrets.ADMIN_TELEGRAM_IDS }}
+        run: node scripts/gh-poll.js --backfill
+
+      # Cache SQLite DB between runs so we don't re-analyze calls
+      - name: Save database cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            ./data/bot.sqlite
+          key: db-${{ github.run_id }}
+          restore-keys: |
+            db-
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-logs-${{ github.run_id }}
+          path: ./data/logs/
+          retention-days: 7

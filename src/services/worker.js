@@ -1,19 +1,16 @@
 'use strict';
 
 const fs = require('fs');
-const path = require('path');
 const config = require('../utils/config');
 const logger = require('../utils/logger');
 const db = require('../db/database');
 const rc = require('./ringcentral');
 const ai = require('./openai');
 const timeUtils = require('../utils/time');
-const { formatCallReview, splitMessage } = require('../utils/formatter');
+const { splitMessage } = require('../utils/formatter');
 
-/**
- * Main polling job: runs every POLL_CRON
- * For each registered user: fetch new calls, download, transcribe, analyze, notify
- */
+// ─── Poll job ─────────────────────────────────────────────────────────────────
+
 async function runPollJob(bot) {
   logger.info('=== Poll job started ===');
   const users = db.getAllActiveUsers();
@@ -21,29 +18,22 @@ async function runPollJob(bot) {
 
   for (const user of users) {
     try {
-      await processUserCalls(user, bot);
+      await processUserCalls(user);
     } catch (err) {
       logger.error(`Poll job error for user ${user.telegram_id}: ${err.message}`);
     }
-    // Delay between users to respect rate limits
     await ai.sleep(2000);
   }
 
   logger.info('=== Poll job finished ===');
 }
 
-/**
- * Process calls for a single user
- */
-async function processUserCalls(user, bot) {
+async function processUserCalls(user) {
   const telegramId = user.telegram_id;
-  const lookbackMinutes = config.bot.lookbackMinutes;
+  logger.info(`Processing user ${telegramId} (ext: ${user.rc_extension_id || 'account'})`);
 
-  logger.info(`Processing user ${telegramId} (ext: ${user.rc_extension_id})`);
-
-  // Step 1: Fetch recent calls from RingCentral
-  const { dateFrom, dateTo } = timeUtils.lookbackRange(lookbackMinutes);
-
+  // Fetch recent calls
+  const { dateFrom, dateTo } = timeUtils.lookbackRange(config.bot.lookbackMinutes);
   let rawCalls;
   try {
     rawCalls = await rc.fetchCallLogs(dateFrom, dateTo, user.rc_extension_id);
@@ -52,52 +42,47 @@ async function processUserCalls(user, bot) {
     return;
   }
 
-  // Step 2: Filter and store new calls
-  let newCallsCount = 0;
+  // Store new calls (no notification yet — silent)
+  let newCount = 0;
   for (const record of rawCalls) {
-    const duration = record.duration || 0;
-    if (duration < config.bot.minCallDurationSeconds) continue;
-    if (!record.recording || !record.recording.contentUri) continue;
-
+    if ((record.duration || 0) < config.bot.minCallDurationSeconds) continue;
+    if (!record.recording?.contentUri) continue;
     if (!db.callExists(record.id)) {
-      const parsed = rc.parseCallRecord(record, telegramId, user.rc_extension_id);
-      db.insertCall(parsed);
-      newCallsCount++;
+      db.insertCall(rc.parseCallRecord(record, telegramId, user.rc_extension_id));
+      newCount++;
     }
   }
+  logger.info(`User ${telegramId}: ${newCount} new calls stored`);
 
-  logger.info(`User ${telegramId}: ${newCallsCount} new calls stored`);
-
-  // Step 3: Analyze unprocessed calls (limit per sync)
+  // Silently transcribe + analyze calls (no Telegram message sent here)
   const toAnalyze = db.getUnanalyzedCallsWithRecording(telegramId, config.bot.maxAnalyzePerSync);
   logger.info(`User ${telegramId}: ${toAnalyze.length} calls queued for analysis`);
 
   for (const call of toAnalyze) {
     try {
-      await analyzeAndNotify(call, user, bot);
+      await analyzeCall(call);
       await ai.sleep(config.openai.delayMs);
     } catch (err) {
-      logger.error(`analyzeAndNotify failed for call ${call.rc_call_id}: ${err.message}`);
+      logger.error(`analyzeCall failed for ${call.rc_call_id}: ${err.message}`);
     }
   }
 
-  // Update sync time
   db.setLastSyncedAt(telegramId, new Date().toISOString());
 }
 
 /**
- * Download, transcribe, analyze a call and send result to user
+ * Download → transcribe → analyze a call and save to DB.
+ * Does NOT send anything to Telegram — results accumulate for end-of-shift report.
  */
-async function analyzeAndNotify(call, user, bot) {
-  const telegramId = user.telegram_id;
-  logger.info(`Analyzing call ${call.rc_call_id} for user ${telegramId}`);
+async function analyzeCall(call) {
+  logger.info(`Analyzing call ${call.rc_call_id} silently...`);
 
-  // Download recording
+  // Download
   let localFile = call.local_file;
   if (!localFile || !fs.existsSync(localFile)) {
     localFile = await rc.downloadRecording(call.rc_call_id, call.recording_url);
     if (!localFile) {
-      logger.warn(`Could not download recording for ${call.rc_call_id}, skipping`);
+      logger.warn(`Could not download ${call.rc_call_id}, skipping`);
       return;
     }
     db.updateCallLocalFile(call.rc_call_id, localFile);
@@ -108,10 +93,9 @@ async function analyzeAndNotify(call, user, bot) {
   try {
     transcription = await ai.transcribeAudio(localFile);
   } catch (err) {
-    logger.error(`Transcription failed for ${call.rc_call_id}: ${err.message}`);
+    logger.error(`Transcription failed ${call.rc_call_id}: ${err.message}`);
     return;
   }
-
   if (!transcription || transcription.trim().length < 10) {
     logger.warn(`Transcription too short for ${call.rc_call_id}, skipping`);
     return;
@@ -126,42 +110,24 @@ async function analyzeAndNotify(call, user, bot) {
       startTime: call.start_time
     });
   } catch (err) {
-    logger.error(`Analysis failed for ${call.rc_call_id}: ${err.message}`);
+    logger.error(`Analysis failed ${call.rc_call_id}: ${err.message}`);
     return;
   }
 
-  // Save to DB
+  // Save to DB — no Telegram message
   db.updateCallAnalysis(call.rc_call_id, transcription, analysis, analysis.score);
+  logger.info(`Call ${call.rc_call_id} analyzed silently (score: ${analysis.score})`);
 
-  // Delete local file to save space
+  // Clean up audio file
   try {
     if (fs.existsSync(localFile)) fs.unlinkSync(localFile);
   } catch (e) {
-    logger.warn(`Could not delete file ${localFile}: ${e.message}`);
-  }
-
-  // Send notification to user
-  try {
-    const callWithDuration = {
-      ...call,
-      durationSeconds: call.duration_seconds,
-      start_time: call.start_time
-    };
-    const message = formatCallReview(callWithDuration, analysis);
-    const chunks = splitMessage(message);
-    for (const chunk of chunks) {
-      await bot.telegram.sendMessage(telegramId, chunk, { parse_mode: 'Markdown' });
-      await ai.sleep(500);
-    }
-    logger.info(`Sent call review to ${telegramId} (score: ${analysis.score})`);
-  } catch (err) {
-    logger.error(`Failed to send review to ${telegramId}: ${err.message}`);
+    logger.warn(`Could not delete ${localFile}: ${e.message}`);
   }
 }
 
-/**
- * End-of-shift job: generate and send daily summary
- */
+// ─── End-of-shift report ──────────────────────────────────────────────────────
+
 async function runEndOfShiftJob(bot) {
   logger.info('=== End-of-shift job started ===');
   const users = db.getAllActiveUsers();
@@ -170,50 +136,51 @@ async function runEndOfShiftJob(bot) {
   for (const user of users) {
     const telegramId = user.telegram_id;
     try {
-      // Skip if already sent today
       if (db.dailyReviewExists(telegramId, today)) {
         logger.info(`Daily review already sent to ${telegramId} for ${today}`);
         continue;
       }
 
       const calls = db.getCallsForDate(telegramId, today);
+      logger.info(`User ${telegramId}: ${calls.length} analyzed calls on ${today}`);
+
       if (calls.length === 0) {
-        logger.info(`No analyzed calls for ${telegramId} on ${today}`);
-        await bot.telegram.sendMessage(
-          telegramId,
-          `📋 *End of Shift – ${today}*\n\nNo calls were analyzed today. Either no calls were made, or recordings were not available.`,
-          { parse_mode: 'Markdown' }
-        );
+        const msg =
+          `📋 *End of Shift – ${today}*\n\n` +
+          `No calls were analyzed today.\n` +
+          `Either no calls were made, recordings were unavailable, ` +
+          `or calls were shorter than ${config.bot.minCallDurationSeconds}s.`;
+        await bot.telegram.sendMessage(telegramId, msg, { parse_mode: 'Markdown' });
         db.saveDailyReview(telegramId, today, 'No calls analyzed.', null, 0, 0);
         continue;
       }
 
-      // Prepare enriched reviews
       const enriched = calls.map(c => ({
         ...c,
         durationSeconds: c.duration_seconds,
-        analysis: safeParseJson(c.analysis_json)
+        analysis: safeJson(c.analysis_json)
       }));
 
-      // Generate summary
       const result = await ai.generateDailySummary(enriched, today);
-
-      // Save to DB
       const avgScore = result.overallScore;
+
       db.saveDailyReview(telegramId, today, result.summary, avgScore, calls.length, calls.length);
 
-      // Send to user
-      const header = `🏁 *End of Shift Report – ${today}*\n📞 Calls Analyzed: ${calls.length}${avgScore !== null ? `\n⭐ Average Score: *${avgScore}/100*` : ''}\n\n`;
+      const header =
+        `🏁 *End of Shift Report – ${today}*\n` +
+        `📞 Calls Analyzed: *${calls.length}*\n` +
+        (avgScore !== null ? `⭐ Average Score: *${avgScore}/100* ${scoreEmoji(avgScore)}\n` : '') +
+        `\n`;
+
       const fullMessage = header + result.summary;
-      const chunks = splitMessage(fullMessage);
-      for (const chunk of chunks) {
+      for (const chunk of splitMessage(fullMessage)) {
         await bot.telegram.sendMessage(telegramId, chunk, { parse_mode: 'Markdown' });
-        await ai.sleep(500);
+        await ai.sleep(400);
       }
 
-      logger.info(`Daily report sent to ${telegramId} for ${today}`);
+      logger.info(`Daily report sent to ${telegramId} (${calls.length} calls, avg: ${avgScore})`);
     } catch (err) {
-      logger.error(`End-of-shift job error for ${telegramId}: ${err.message}`);
+      logger.error(`End-of-shift error for ${telegramId}: ${err.message}`);
     }
 
     await ai.sleep(3000);
@@ -222,9 +189,8 @@ async function runEndOfShiftJob(bot) {
   logger.info('=== End-of-shift job finished ===');
 }
 
-/**
- * Weekly summary job: runs after Saturday end-of-shift
- */
+// ─── Weekly report ────────────────────────────────────────────────────────────
+
 async function runWeeklyJob(bot) {
   logger.info('=== Weekly job started ===');
   const users = db.getAllActiveUsers();
@@ -235,30 +201,31 @@ async function runWeeklyJob(bot) {
     try {
       const dailyReviews = db.getDailyReviews(telegramId, weekStart, weekEnd);
       if (dailyReviews.length === 0) {
-        logger.info(`No daily reviews for ${telegramId} in week ${weekStart}–${weekEnd}`);
+        logger.info(`No daily reviews for ${telegramId} week ${weekStart}–${weekEnd}`);
         continue;
       }
 
       const result = await ai.generateWeeklySummary(dailyReviews, weekStart, weekEnd);
       const avgScore = result.overallScore;
+      const totalCalls = dailyReviews.reduce((s, r) => s + (r.total_calls || 0), 0);
 
-      // Save
-      db.saveWeeklyReview(
-        telegramId, weekStart, weekEnd,
-        result.summary, avgScore,
-        dailyReviews.reduce((s, r) => s + (r.total_calls || 0), 0)
-      );
+      db.saveWeeklyReview(telegramId, weekStart, weekEnd, result.summary, avgScore, totalCalls);
 
-      // Send
-      const header = `📅 *Weekly Performance Report*\n🗓 ${weekStart} → ${weekEnd}\n📆 Days Reviewed: ${dailyReviews.length}${avgScore !== null ? `\n🏆 Weekly Average: *${avgScore}/100*` : ''}\n\n`;
+      const header =
+        `📅 *Weekly Performance Report*\n` +
+        `🗓 ${weekStart} → ${weekEnd}\n` +
+        `📆 Days Reviewed: *${dailyReviews.length}*\n` +
+        `📞 Total Calls: *${totalCalls}*\n` +
+        (avgScore !== null ? `🏆 Weekly Average: *${avgScore}/100* ${scoreEmoji(avgScore)}\n` : '') +
+        `\n`;
+
       const fullMessage = header + result.summary;
-      const chunks = splitMessage(fullMessage);
-      for (const chunk of chunks) {
+      for (const chunk of splitMessage(fullMessage)) {
         await bot.telegram.sendMessage(telegramId, chunk, { parse_mode: 'Markdown' });
-        await ai.sleep(500);
+        await ai.sleep(400);
       }
 
-      logger.info(`Weekly report sent to ${telegramId} for week ${weekStart}`);
+      logger.info(`Weekly report sent to ${telegramId} for ${weekStart}`);
     } catch (err) {
       logger.error(`Weekly job error for ${telegramId}: ${err.message}`);
     }
@@ -269,30 +236,27 @@ async function runWeeklyJob(bot) {
   logger.info('=== Weekly job finished ===');
 }
 
-/**
- * Backfill: process calls from the last N days on first registration
- */
+// ─── Backfill ─────────────────────────────────────────────────────────────────
+
 async function backfillUser(user, bot, days = null) {
   const backfillDays = days || config.bot.backfillDays;
   const { dateFrom, dateTo } = timeUtils.lastNDaysRange(backfillDays);
-
-  logger.info(`Backfill for user ${user.telegram_id}: last ${backfillDays} days`);
+  logger.info(`Backfill for ${user.telegram_id}: last ${backfillDays} days`);
 
   let rawCalls;
   try {
     rawCalls = await rc.fetchCallLogs(dateFrom, dateTo, user.rc_extension_id);
   } catch (err) {
     logger.error(`Backfill fetchCallLogs failed: ${err.message}`);
-    return;
+    return 0;
   }
 
   let stored = 0;
   for (const record of rawCalls) {
     if ((record.duration || 0) < config.bot.minCallDurationSeconds) continue;
-    if (!record.recording || !record.recording.contentUri) continue;
+    if (!record.recording?.contentUri) continue;
     if (!db.callExists(record.id)) {
-      const parsed = rc.parseCallRecord(record, user.telegram_id, user.rc_extension_id);
-      db.insertCall(parsed);
+      db.insertCall(rc.parseCallRecord(record, user.telegram_id, user.rc_extension_id));
       stored++;
     }
   }
@@ -301,12 +265,15 @@ async function backfillUser(user, bot, days = null) {
   return stored;
 }
 
-function safeParseJson(str) {
-  try {
-    return str ? JSON.parse(str) : {};
-  } catch {
-    return {};
-  }
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function safeJson(str) {
+  try { return str ? JSON.parse(str) : {}; } catch { return {}; }
+}
+
+function scoreEmoji(s) {
+  if (s >= 90) return '🌟'; if (s >= 75) return '✅';
+  if (s >= 60) return '🟡'; if (s >= 40) return '🟠'; return '🔴';
 }
 
 module.exports = {

@@ -3,17 +3,16 @@
 /**
  * gh-poll.js
  * Runs during shift hours every 30 min via GitHub Actions.
- * Fetches new calls, downloads recordings, transcribes + analyzes,
- * sends per-call reviews to Telegram.
+ * Silently fetches calls, transcribes and analyzes — saves to DB only.
+ * NO per-call Telegram messages. Only the end-of-shift report (gh-daily.js) notifies the user.
  */
 
 const fs = require('fs');
 const {
-  config, log, db, tgSend,
-  isShiftActive, todayDateCT, lookbackRange, lastNDaysRange, sleep,
+  config, log, db,
+  isShiftActive, lookbackRange, lastNDaysRange, sleep,
   fetchCallLogs, downloadRecording, parseRecord,
-  transcribeAudio, analyzeCall,
-  fmtCallReview
+  transcribeAudio, analyzeCall
 } = require('./gh-shared');
 
 const isBackfill = process.argv.includes('--backfill');
@@ -21,7 +20,6 @@ const isBackfill = process.argv.includes('--backfill');
 async function main() {
   log.info(`=== gh-poll.js started [${isBackfill ? 'BACKFILL' : 'POLL'}] ===`);
 
-  // In scheduled mode, skip if outside shift hours
   if (!isBackfill && process.env.GH_ACTIONS_MODE === 'true' && !isShiftActive()) {
     log.info('Outside shift hours (9 AM – 7 PM CT). Exiting.');
     process.exit(0);
@@ -29,13 +27,7 @@ async function main() {
 
   const users = db.getAllActiveUsers();
   if (users.length === 0) {
-    log.warn('No registered users found in DB. Have users started the bot and entered their phone number?');
-    // Notify admins
-    for (const adminId of config.bot.adminIds) {
-      await tgSend(adminId,
-        `⚠️ *GitHub Actions Poll*\n\nNo registered users found in the database.\n\nUsers need to start the Telegram bot and enter their phone number first.`
-      );
-    }
+    log.warn('No registered users found in DB.');
     process.exit(0);
   }
 
@@ -46,7 +38,6 @@ async function main() {
       await processUser(user);
     } catch (err) {
       log.error(`processUser ${user.telegram_id}: ${err.message}`);
-      if (err.stack) log.error(err.stack);
     }
     await sleep(3000);
   }
@@ -58,26 +49,19 @@ async function processUser(user) {
   const { telegram_id: telegramId, rc_extension_id: extensionId } = user;
   log.info(`User ${telegramId} | ext: ${extensionId || 'account-level'}`);
 
-  // Date range
   const range = isBackfill
     ? lastNDaysRange(config.bot.backfillDays)
     : lookbackRange(config.bot.lookbackMinutes);
 
-  log.info(`Fetching calls ${range.dateFrom} → ${range.dateTo}`);
-
-  // Fetch calls
+  // Fetch and store new calls
   let rawCalls;
   try {
     rawCalls = await fetchCallLogs(range.dateFrom, range.dateTo, extensionId);
   } catch (err) {
     log.error(`fetchCallLogs failed: ${err.message}`);
-    await tgSend(telegramId,
-      `⚠️ *GitHub Actions*: Failed to fetch calls from RingCentral.\n\`${err.message}\``
-    );
     return;
   }
 
-  // Store new calls
   let newCount = 0;
   for (const record of rawCalls) {
     if ((record.duration || 0) < config.bot.minCallDurationSeconds) continue;
@@ -89,68 +73,43 @@ async function processUser(user) {
   }
   log.info(`Stored ${newCount} new calls`);
 
-  // Analyze pending calls
+  // Silently transcribe + analyze — NO Telegram notification per call
   const limit = isBackfill ? 10 : config.bot.maxAnalyzePerSync;
   const toAnalyze = db.getUnanalyzed(telegramId, limit);
-  log.info(`${toAnalyze.length} calls queued for analysis`);
-
-  if (toAnalyze.length === 0) {
-    if (isBackfill) {
-      await tgSend(telegramId,
-        `📭 *GitHub Actions Backfill*\n\nNo new recorded calls found in the last ${config.bot.backfillDays} days.\nI'll start capturing calls from now.`
-      );
-    }
-    return;
-  }
-
-  if (isBackfill) {
-    await tgSend(telegramId,
-      `🔄 *GitHub Actions Backfill*\n\nFound *${toAnalyze.length}* recorded calls to analyze. Starting now...`
-    );
-  }
+  log.info(`${toAnalyze.length} calls queued for silent analysis`);
 
   for (const call of toAnalyze) {
     try {
-      await analyzeAndNotify(call, telegramId);
+      await analyzeSilently(call);
     } catch (err) {
-      log.error(`analyzeAndNotify ${call.rc_call_id}: ${err.message}`);
+      log.error(`analyzeSilently ${call.rc_call_id}: ${err.message}`);
     }
-    await sleep(config.openai.delayMs);
+    await sleep(config.openai?.delayMs || 5000);
   }
 
-  // Update sync state
   db.setLastSyncedAt(telegramId, new Date().toISOString());
 }
 
-async function analyzeAndNotify(call, telegramId) {
-  log.info(`Analyzing call ${call.rc_call_id}...`);
+async function analyzeSilently(call) {
+  log.info(`Analyzing ${call.rc_call_id} silently...`);
 
-  // Download recording
   let localFile = call.local_file;
   if (!localFile || !fs.existsSync(localFile)) {
     localFile = await downloadRecording(call.rc_call_id, call.recording_url);
-    if (!localFile) {
-      log.warn(`Could not download recording ${call.rc_call_id}, skipping`);
-      return;
-    }
+    if (!localFile) { log.warn(`Download failed for ${call.rc_call_id}`); return; }
     db.updateCallLocalFile(call.rc_call_id, localFile);
   }
 
-  // Transcribe
   let transcription;
   try {
     transcription = await transcribeAudio(localFile);
   } catch (err) {
-    log.error(`Transcription error: ${err.message}`);
-    return;
+    log.error(`Transcription error: ${err.message}`); return;
   }
-
   if (!transcription || transcription.trim().length < 10) {
-    log.warn(`Transcription too short for ${call.rc_call_id}, skipping`);
-    return;
+    log.warn(`Transcription too short for ${call.rc_call_id}`); return;
   }
 
-  // Analyze
   let analysis;
   try {
     analysis = await analyzeCall(transcription, {
@@ -159,33 +118,21 @@ async function analyzeAndNotify(call, telegramId) {
       startTime: call.start_time
     });
   } catch (err) {
-    log.error(`Analysis error: ${err.message}`);
-    return;
+    log.error(`Analysis error: ${err.message}`); return;
   }
 
-  // Save to DB
+  // Save to DB — no Telegram message
   db.updateCallAnalysis(call.rc_call_id, transcription, analysis, analysis.score);
+  log.info(`Call ${call.rc_call_id} saved (score: ${analysis.score})`);
 
-  // Clean up audio file
   try {
     if (fs.existsSync(localFile)) fs.unlinkSync(localFile);
   } catch (e) {
-    log.warn(`Could not delete ${localFile}: ${e.message}`);
+    log.warn(`Could not delete ${localFile}`);
   }
-
-  // Format and send
-  const callWithMeta = { ...call, durationSeconds: call.duration_seconds };
-  const message = fmtCallReview(callWithMeta, analysis);
-
-  // Add GH Actions badge so user knows source
-  const badge = `\n\n_🤖 via GitHub Actions · ${todayDateCT()}_`;
-  await tgSend(telegramId, message + badge);
-
-  log.info(`Review sent to ${telegramId} (score: ${analysis.score})`);
 }
 
 main().catch(err => {
   log.error(`Fatal: ${err.message}`);
-  if (err.stack) log.error(err.stack);
   process.exit(1);
 });

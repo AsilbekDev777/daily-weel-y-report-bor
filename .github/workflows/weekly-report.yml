@@ -1,56 +1,57 @@
-name: 📅 Weekly Performance Report
+name: Weekly Performance Report
 
 on:
   schedule:
-    # Saturday 7:05 PM CT = 00:05 UTC Sunday (CDT) or 01:05 UTC Sunday (CST)
-    # Run after daily report completes
-    - cron: '5 0 * * 0'    # Sunday 00:05 UTC = Saturday 7:05 PM CDT
-    - cron: '5 1 * * 0'    # Sunday 01:05 UTC = Saturday 7:05 PM CST
+    # Saturday 7:05 PM CT (CDT=UTC-5) = Sunday 00:05 UTC
+    - cron: '5 0 * * 0'
+    # Saturday 7:05 PM CT (CST=UTC-6) = Sunday 01:05 UTC
+    - cron: '5 1 * * 0'
 
   workflow_dispatch:
     inputs:
       week_start:
-        description: 'Week start date (YYYY-MM-DD, Monday). Leave empty for auto.'
+        description: 'Week start (YYYY-MM-DD, Monday). Leave empty for auto.'
         required: false
         default: ''
       week_end:
-        description: 'Week end date (YYYY-MM-DD, Saturday). Leave empty for auto.'
+        description: 'Week end (YYYY-MM-DD, Saturday). Leave empty for auto.'
         required: false
         default: ''
 
 jobs:
   weekly-report:
-    name: Generate & Send Weekly Report
+    name: Generate Weekly Report
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
-      - name: Restore database cache
+      - name: Restore DB cache
         uses: actions/cache/restore@v4
         with:
           path: ./data/bot.sqlite
-          key: db-${{ github.run_id }}
           restore-keys: |
-            db-
+            bot-db-
+
+      - name: Create data dirs
+        run: mkdir -p data/recordings data/logs
 
       - name: Run weekly report
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_ANALYSIS_MODEL: ${{ secrets.OPENAI_ANALYSIS_MODEL || 'gpt-4o-mini' }}
-          RC_SERVER_URL: ${{ secrets.RC_SERVER_URL || 'https://platform.ringcentral.com' }}
+          OPENAI_ANALYSIS_MODEL: gpt-4o-mini
+          RC_SERVER_URL: https://platform.ringcentral.com
           RC_CLIENT_ID: ${{ secrets.RC_CLIENT_ID }}
           RC_CLIENT_SECRET: ${{ secrets.RC_CLIENT_SECRET }}
           RC_JWT: ${{ secrets.RC_JWT }}
@@ -66,19 +67,17 @@ jobs:
           WEEK_END_OVERRIDE: ${{ github.event.inputs.week_end }}
         run: node scripts/gh-weekly.js
 
-      - name: Save database cache
+      - name: Save DB cache
         uses: actions/cache/save@v4
         if: always()
         with:
           path: ./data/bot.sqlite
-          key: db-${{ github.run_id }}
-          restore-keys: |
-            db-
+          key: bot-db-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: weekly-error-logs-${{ github.run_id }}
+          name: weekly-logs-${{ github.run_id }}
           path: ./data/logs/
-          retention-days: 7
+          retention-days: 3

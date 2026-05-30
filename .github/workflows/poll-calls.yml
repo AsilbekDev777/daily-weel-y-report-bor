@@ -1,14 +1,130 @@
-name: 📞 Poll & Analyze Calls
+name: Poll and Analyze Calls
 
 on:
   schedule:
-    # Every 30 min, Mon-Sat, 14:00-00:00 UTC = 9:00 AM - 7:00 PM CT (CDT UTC-5)
-    # During CST (UTC-6) winter: 15:00-01:00 UTC
-    # We run broadly 14:00-01:00 UTC and let the script check shift hours itself
-    - cron: '0,30 14-23 * * 1-6'
-    - cron: '0,30 0 * * 2-7'
+    # Every 30 min during shift hours (9AM-7PM CT = 14:00-00:00 UTC in CDT / 15:00-01:00 UTC in CST)
+    # Split into individual cron lines — GitHub does not support comma+range in same field
+    - cron: '0 14 * * 1'
+    - cron: '30 14 * * 1'
+    - cron: '0 15 * * 1'
+    - cron: '30 15 * * 1'
+    - cron: '0 16 * * 1'
+    - cron: '30 16 * * 1'
+    - cron: '0 17 * * 1'
+    - cron: '30 17 * * 1'
+    - cron: '0 18 * * 1'
+    - cron: '30 18 * * 1'
+    - cron: '0 19 * * 1'
+    - cron: '30 19 * * 1'
+    - cron: '0 20 * * 1'
+    - cron: '30 20 * * 1'
+    - cron: '0 21 * * 1'
+    - cron: '30 21 * * 1'
+    - cron: '0 22 * * 1'
+    - cron: '30 22 * * 1'
+    - cron: '0 23 * * 1'
+    - cron: '30 23 * * 1'
+    - cron: '0 14 * * 2'
+    - cron: '30 14 * * 2'
+    - cron: '0 15 * * 2'
+    - cron: '30 15 * * 2'
+    - cron: '0 16 * * 2'
+    - cron: '30 16 * * 2'
+    - cron: '0 17 * * 2'
+    - cron: '30 17 * * 2'
+    - cron: '0 18 * * 2'
+    - cron: '30 18 * * 2'
+    - cron: '0 19 * * 2'
+    - cron: '30 19 * * 2'
+    - cron: '0 20 * * 2'
+    - cron: '30 20 * * 2'
+    - cron: '0 21 * * 2'
+    - cron: '30 21 * * 2'
+    - cron: '0 22 * * 2'
+    - cron: '30 22 * * 2'
+    - cron: '0 23 * * 2'
+    - cron: '30 23 * * 2'
+    - cron: '0 14 * * 3'
+    - cron: '30 14 * * 3'
+    - cron: '0 15 * * 3'
+    - cron: '30 15 * * 3'
+    - cron: '0 16 * * 3'
+    - cron: '30 16 * * 3'
+    - cron: '0 17 * * 3'
+    - cron: '30 17 * * 3'
+    - cron: '0 18 * * 3'
+    - cron: '30 18 * * 3'
+    - cron: '0 19 * * 3'
+    - cron: '30 19 * * 3'
+    - cron: '0 20 * * 3'
+    - cron: '30 20 * * 3'
+    - cron: '0 21 * * 3'
+    - cron: '30 21 * * 3'
+    - cron: '0 22 * * 3'
+    - cron: '30 22 * * 3'
+    - cron: '0 23 * * 3'
+    - cron: '30 23 * * 3'
+    - cron: '0 14 * * 4'
+    - cron: '30 14 * * 4'
+    - cron: '0 15 * * 4'
+    - cron: '30 15 * * 4'
+    - cron: '0 16 * * 4'
+    - cron: '30 16 * * 4'
+    - cron: '0 17 * * 4'
+    - cron: '30 17 * * 4'
+    - cron: '0 18 * * 4'
+    - cron: '30 18 * * 4'
+    - cron: '0 19 * * 4'
+    - cron: '30 19 * * 4'
+    - cron: '0 20 * * 4'
+    - cron: '30 20 * * 4'
+    - cron: '0 21 * * 4'
+    - cron: '30 21 * * 4'
+    - cron: '0 22 * * 4'
+    - cron: '30 22 * * 4'
+    - cron: '0 23 * * 4'
+    - cron: '30 23 * * 4'
+    - cron: '0 14 * * 5'
+    - cron: '30 14 * * 5'
+    - cron: '0 15 * * 5'
+    - cron: '30 15 * * 5'
+    - cron: '0 16 * * 5'
+    - cron: '30 16 * * 5'
+    - cron: '0 17 * * 5'
+    - cron: '30 17 * * 5'
+    - cron: '0 18 * * 5'
+    - cron: '30 18 * * 5'
+    - cron: '0 19 * * 5'
+    - cron: '30 19 * * 5'
+    - cron: '0 20 * * 5'
+    - cron: '30 20 * * 5'
+    - cron: '0 21 * * 5'
+    - cron: '30 21 * * 5'
+    - cron: '0 22 * * 5'
+    - cron: '30 22 * * 5'
+    - cron: '0 23 * * 5'
+    - cron: '30 23 * * 5'
+    - cron: '0 14 * * 6'
+    - cron: '30 14 * * 6'
+    - cron: '0 15 * * 6'
+    - cron: '30 15 * * 6'
+    - cron: '0 16 * * 6'
+    - cron: '30 16 * * 6'
+    - cron: '0 17 * * 6'
+    - cron: '30 17 * * 6'
+    - cron: '0 18 * * 6'
+    - cron: '30 18 * * 6'
+    - cron: '0 19 * * 6'
+    - cron: '30 19 * * 6'
+    - cron: '0 20 * * 6'
+    - cron: '30 20 * * 6'
+    - cron: '0 21 * * 6'
+    - cron: '30 21 * * 6'
+    - cron: '0 22 * * 6'
+    - cron: '30 22 * * 6'
+    - cron: '0 23 * * 6'
+    - cron: '30 23 * * 6'
 
-  # Allow manual trigger from GitHub UI
   workflow_dispatch:
     inputs:
       mode:
@@ -18,37 +134,44 @@ on:
         type: choice
         options:
           - poll
-          - daily
-          - weekly
           - backfill
 
 jobs:
   poll-calls:
-    name: Poll & Analyze Calls
+    name: Poll and Analyze Calls
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
-      - name: Run poll job
+      - name: Restore DB cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ./data/bot.sqlite
+          restore-keys: |
+            bot-db-
+
+      - name: Create data dirs
+        run: mkdir -p data/recordings data/logs
+
+      - name: Run poll
         if: github.event_name == 'schedule' || github.event.inputs.mode == 'poll'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_ANALYSIS_MODEL: ${{ secrets.OPENAI_ANALYSIS_MODEL || 'gpt-4o-mini' }}
-          OPENAI_TRANSCRIPTION_MODEL: ${{ secrets.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe' }}
-          RC_SERVER_URL: ${{ secrets.RC_SERVER_URL || 'https://platform.ringcentral.com' }}
+          OPENAI_ANALYSIS_MODEL: gpt-4o-mini
+          OPENAI_TRANSCRIPTION_MODEL: gpt-4o-mini-transcribe
+          RC_SERVER_URL: https://platform.ringcentral.com
           RC_CLIENT_ID: ${{ secrets.RC_CLIENT_ID }}
           RC_CLIENT_SECRET: ${{ secrets.RC_CLIENT_SECRET }}
           RC_JWT: ${{ secrets.RC_JWT }}
@@ -72,9 +195,9 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_ANALYSIS_MODEL: ${{ secrets.OPENAI_ANALYSIS_MODEL || 'gpt-4o-mini' }}
-          OPENAI_TRANSCRIPTION_MODEL: ${{ secrets.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe' }}
-          RC_SERVER_URL: ${{ secrets.RC_SERVER_URL || 'https://platform.ringcentral.com' }}
+          OPENAI_ANALYSIS_MODEL: gpt-4o-mini
+          OPENAI_TRANSCRIPTION_MODEL: gpt-4o-mini-transcribe
+          RC_SERVER_URL: https://platform.ringcentral.com
           RC_CLIENT_ID: ${{ secrets.RC_CLIENT_ID }}
           RC_CLIENT_SECRET: ${{ secrets.RC_CLIENT_SECRET }}
           RC_JWT: ${{ secrets.RC_JWT }}
@@ -94,21 +217,17 @@ jobs:
           ADMIN_TELEGRAM_IDS: ${{ secrets.ADMIN_TELEGRAM_IDS }}
         run: node scripts/gh-poll.js --backfill
 
-      # Cache SQLite DB between runs so we don't re-analyze calls
-      - name: Save database cache
+      - name: Save DB cache
         uses: actions/cache/save@v4
         if: always()
         with:
-          path: |
-            ./data/bot.sqlite
-          key: db-${{ github.run_id }}
-          restore-keys: |
-            db-
+          path: ./data/bot.sqlite
+          key: bot-db-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: error-logs-${{ github.run_id }}
+          name: poll-logs-${{ github.run_id }}
           path: ./data/logs/
-          retention-days: 7
+          retention-days: 3

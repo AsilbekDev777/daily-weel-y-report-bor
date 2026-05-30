@@ -154,12 +154,6 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Restore DB cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ./data/bot.sqlite
-          restore-keys: |
-            bot-db-
 
       - name: Create data dirs
         run: mkdir -p data/recordings data/logs

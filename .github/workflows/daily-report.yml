@@ -2,14 +2,20 @@ name: End-of-Shift Daily Report
 
 on:
   schedule:
-    # 7:00 PM CT (CDT = UTC-5) = 00:00 UTC next day  → Mon-Sat CT = Tue-Sun UTC
-    - cron: '0 0 * * 2'   # Monday CT   → Tuesday   00:00 UTC
-    - cron: '0 0 * * 3'   # Tuesday CT  → Wednesday 00:00 UTC
-    - cron: '0 0 * * 4'   # Wednesday CT → Thursday 00:00 UTC
-    - cron: '0 0 * * 5'   # Thursday CT → Friday    00:00 UTC
-    - cron: '0 0 * * 6'   # Friday CT   → Saturday  00:00 UTC
-    - cron: '0 0 * * 0'   # Saturday CT → Sunday    00:00 UTC
-    # CST (UTC-6, Nov-Mar) = 01:00 UTC — covered by same lines since script checks CT time
+    # 7:00 PM CT (CDT=UTC-5) = 00:00 UTC (next day)
+    - cron: '0 0 * * 2'   # Monday    CT → Tuesday    00:00 UTC
+    - cron: '0 0 * * 3'   # Tuesday   CT → Wednesday  00:00 UTC
+    - cron: '0 0 * * 4'   # Wednesday CT → Thursday   00:00 UTC
+    - cron: '0 0 * * 5'   # Thursday  CT → Friday     00:00 UTC
+    - cron: '0 0 * * 6'   # Friday    CT → Saturday   00:00 UTC
+    - cron: '0 0 * * 0'   # Saturday  CT → Sunday     00:00 UTC
+    # 7:00 PM CT (CST=UTC-6) = 01:00 UTC (next day)
+    - cron: '0 1 * * 2'
+    - cron: '0 1 * * 3'
+    - cron: '0 1 * * 4'
+    - cron: '0 1 * * 5'
+    - cron: '0 1 * * 6'
+    - cron: '0 1 * * 0'
 
   workflow_dispatch:
     inputs:
@@ -31,10 +37,20 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '22'
 
       - name: Install dependencies
         run: npm install
+
+      - name: Restore DB cache
+        id: restore-cache
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ./data/bot.sqlite
+          key: bot-db-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            bot-db-${{ runner.os }}-
 
       - name: Create data dirs
         run: mkdir -p data/recordings data/logs
@@ -57,15 +73,17 @@ jobs:
           DEBUG_MODE: 'false'
           GH_ACTIONS_MODE: 'true'
           ADMIN_TELEGRAM_IDS: ${{ secrets.ADMIN_TELEGRAM_IDS }}
+          GH_USERS: ${{ secrets.GH_USERS }}
+          FORCE_RESEND: ${{ github.event.inputs.force_resend }}
           DATE_OVERRIDE: ${{ github.event.inputs.date_override }}
         run: node scripts/gh-daily.js
 
       - name: Save DB cache
-        uses: actions/cache/save@v4
         if: always()
+        uses: actions/cache/save@v4
         with:
           path: ./data/bot.sqlite
-          key: bot-db-${{ github.run_id }}-${{ github.run_attempt }}
+          key: bot-db-${{ runner.os }}-${{ github.run_id }}
 
       - name: Upload logs on failure
         if: failure()
@@ -73,4 +91,5 @@ jobs:
         with:
           name: daily-logs-${{ github.run_id }}
           path: ./data/logs/
+          if-no-files-found: ignore
           retention-days: 3

@@ -2,8 +2,6 @@ name: Poll and Analyze Calls
 
 on:
   schedule:
-    # Every 30 min during shift hours (9AM-7PM CT = 14:00-00:00 UTC in CDT / 15:00-01:00 UTC in CST)
-    # Split into individual cron lines — GitHub does not support comma+range in same field
     - cron: '0 14 * * 1'
     - cron: '30 14 * * 1'
     - cron: '0 15 * * 1'
@@ -149,12 +147,24 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '22'
 
       - name: Install dependencies
         run: npm install
 
+      # FIX: key is now required — use a fixed daily key so every run today
+      # restores the same DB and saves back to it
+      - name: Restore DB cache
+        id: restore-cache
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ./data/bot.sqlite
+          key: bot-db-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            bot-db-${{ runner.os }}-
 
+      # Always create dirs AFTER cache restore so the file can land in the right place
       - name: Create data dirs
         run: mkdir -p data/recordings data/logs
 
@@ -182,6 +192,7 @@ jobs:
           DEBUG_MODE: 'false'
           GH_ACTIONS_MODE: 'true'
           ADMIN_TELEGRAM_IDS: ${{ secrets.ADMIN_TELEGRAM_IDS }}
+          GH_USERS: ${{ secrets.GH_USERS }}
         run: node scripts/gh-poll.js
 
       - name: Run backfill
@@ -209,14 +220,16 @@ jobs:
           GH_ACTIONS_MODE: 'true'
           BACKFILL_DAYS: '7'
           ADMIN_TELEGRAM_IDS: ${{ secrets.ADMIN_TELEGRAM_IDS }}
+          GH_USERS: ${{ secrets.GH_USERS }}
         run: node scripts/gh-poll.js --backfill
 
+      # FIX: save only if DB file actually exists to avoid "path not found" warning
       - name: Save DB cache
-        uses: actions/cache/save@v4
         if: always()
+        uses: actions/cache/save@v4
         with:
           path: ./data/bot.sqlite
-          key: bot-db-${{ github.run_id }}-${{ github.run_attempt }}
+          key: bot-db-${{ runner.os }}-${{ github.run_id }}
 
       - name: Upload logs on failure
         if: failure()
@@ -224,4 +237,5 @@ jobs:
         with:
           name: poll-logs-${{ github.run_id }}
           path: ./data/logs/
+          if-no-files-found: ignore
           retention-days: 3

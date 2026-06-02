@@ -8,8 +8,8 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const CT_ZONE = 'America/Chicago';
-const SHIFT_START_HOUR = 9;  // 9:00 AM CT
-const SHIFT_END_HOUR = 19;   // 7:00 PM CT
+const SHIFT_START_HOUR = 8;  // 8:00 AM CT
+const SHIFT_END_HOUR = 18;   // 6:00 PM CT
 
 function nowCT() {
   return dayjs().tz(CT_ZONE);
@@ -21,8 +21,8 @@ function isShiftActive() {
 }
 
 // REMOVED isShiftEnd() — was the root cause of the missing end-of-shift report.
-// The scheduler now uses cron expression "0 19 * * *" with timezone: CT_ZONE
-// which fires exactly once at 19:00 CT. No polling every minute needed.
+// The scheduler now uses cron expression "0 18 * * *" with timezone: CT_ZONE
+// which fires exactly once at 18:00 CT. No polling every minute needed.
 
 function isSaturday() {
   return nowCT().day() === 6;

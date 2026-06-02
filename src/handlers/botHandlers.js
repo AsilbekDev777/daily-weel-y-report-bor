@@ -24,7 +24,7 @@ function registerHandlers(bot) {
       await ctx.reply(
         `👋 Welcome back, *${firstName}*!\n\n` +
         `✅ You're already set up with phone number: \`${user.rc_phone_number}\`\n\n` +
-        `I'll continue monitoring your calls during shift hours (9:00 AM – 7:00 PM CT) ` +
+        `I'll continue monitoring your calls during shift hours (8:00 AM – 6:00 PM CT) ` +
         `and send you reviews after each analyzed call.\n\n` +
         `📊 Daily reports are sent at end of shift.\n` +
         `📅 Weekly reports are sent every Saturday.`,
@@ -35,7 +35,7 @@ function registerHandlers(bot) {
       await ctx.reply(
         `👋 Hello, *${firstName}*! Welcome to the *Call Quality Review Bot*.\n\n` +
         `I will:\n` +
-        `• 🎙 Monitor your RingCentral calls during shift (9 AM – 7 PM CT)\n` +
+        `• 🎙 Monitor your RingCentral calls during shift (8 AM – 6 PM CT)\n` +
         `• 📝 Transcribe and analyze each call with AI\n` +
         `• ⭐ Score your performance (0–100) and give advice\n` +
         `• 📊 Send a daily summary at end of shift\n` +
@@ -63,7 +63,7 @@ function registerHandlers(bot) {
       `📊 *Your Status*\n\n` +
       `📱 Phone: \`${user.rc_phone_number}\`\n` +
       `🔌 Extension ID: \`${user.rc_extension_id || 'Auto-detected'}\`\n` +
-      `🕐 Shift: ${shiftActive ? '🟢 Active (9 AM – 7 PM CT)' : '🔴 Inactive'}\n` +
+      `🕐 Shift: ${shiftActive ? '🟢 Active (8 AM – 6 PM CT)' : '🔴 Inactive'}\n` +
       `🔄 Last Sync: ${lastSync ? new Date(lastSync).toLocaleString() : 'Never'}\n` +
       `📅 Today: ${timeUtils.todayDateCT()}`,
       { parse_mode: 'Markdown' }
@@ -80,12 +80,12 @@ function registerHandlers(bot) {
       `/help – Show this help message\n\n` +
       `*How it works:*\n` +
       `1️⃣ Register with your RingCentral phone number\n` +
-      `2️⃣ During shift (9 AM–7 PM CT), I poll your calls every 30 minutes\n` +
+      `2️⃣ During shift (8 AM – 6 PM CT), I poll your calls every 30 minutes\n` +
       `3️⃣ Each recorded call is transcribed and analyzed by AI\n` +
       `4️⃣ You receive instant feedback on each call\n` +
-      `5️⃣ At 7 PM, you receive an end-of-shift summary\n` +
+      `5️⃣ At 6 PM, you receive an end-of-shift summary\n` +
       `6️⃣ Every Saturday, a weekly performance report is sent\n\n` +
-      `*Shift Hours:* 9:00 AM – 7:00 PM (Central Time)\n\n` +
+      `*Shift Hours:* 8:00 AM – 6:00 PM (Central Time)\n\n` +
       `For issues, contact your administrator.`,
       { parse_mode: 'Markdown' }
     );
@@ -229,7 +229,7 @@ async function handlePhoneInput(ctx, telegramId, phoneInput, bot) {
     `🎉 I'm now monitoring your calls!\n\n` +
     `*Schedule:*\n` +
     `• Calls checked every 30 minutes during shift\n` +
-    `• Shift: 9:00 AM – 7:00 PM (Central Time)\n` +
+    `• Shift: 8:00 AM – 6:00 PM (Central Time)\n` +
     `• Daily report sent at end of shift\n` +
     `• Weekly report sent every Saturday\n\n` +
     `You don't need to do anything else — just focus on your calls! 📞`,

@@ -55,7 +55,7 @@ function startScheduler(bot) {
         if (!weeklyRunning) {
           weeklyRunning = true;
           try {
-            logger.info('Saturday 19:00 CT — running weekly summary job');
+            logger.info('Saturday 18:00 CT — running weekly summary job');
             await new Promise(r => setTimeout(r, 5000));
             await worker.runWeeklyJob(bot);
           } catch (err) {

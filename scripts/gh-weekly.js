@@ -2,22 +2,21 @@
 
 /**
  * gh-weekly.js — Weekly Performance Report
- *
- * SELF-CONTAINED: generates daily summaries on-the-fly if they don't exist,
- * then creates a weekly aggregate. Does NOT depend on daily workflow having run.
+ * SELF-CONTAINED: generates missing daily reviews on-the-fly.
  */
 
 const {
   config, log, db, tgSend,
   todayDateCT, todayShiftUtcRange,
-  ctDayToUtcRange, weekRangeEndingSaturday,
-  sleep, scoreEmoji, safeJson,
+  weekRangeEndingSaturday, sleep, scoreEmoji, safeJson,
   syncAndAnalyzeCalls, generateDailySummary, generateWeeklySummary
 } = require('./gh-shared');
 
 async function main() {
   log.info('=== gh-weekly.js started ===');
-  log.info(`Current UTC: ${new Date().toISOString()}`);
+  log.info(`Current UTC:     ${new Date().toISOString()}`);
+  log.info(`GH_USERS secret: "${config.bot.ghUsers || '(NOT SET)'}"`);
+  log.info(`Admin IDs:       ${config.bot.adminIds.join(', ') || '(NOT SET)'}`);
 
   const weekStartOverride = process.env.WEEK_START_OVERRIDE || '';
   const weekEndOverride   = process.env.WEEK_END_OVERRIDE   || '';
@@ -29,17 +28,31 @@ async function main() {
     log.info(`Manual week: ${weekStart} → ${weekEnd}`);
   } else {
     const today = todayDateCT();
-    const r = weekRangeEndingSaturday(today);
-    weekStart = r.weekStart;
-    weekEnd   = r.weekEnd;
+    const r     = weekRangeEndingSaturday(today);
+    weekStart   = r.weekStart;
+    weekEnd     = r.weekEnd;
     log.info(`Auto week (CT today: ${today}): ${weekStart} → ${weekEnd}`);
   }
 
   const users = db.getAllActiveUsers();
+
   if (users.length === 0) {
-    log.warn('No active users. Set GH_USERS secret or register via bot.');
+    log.warn('No registered users found.');
+    const msg =
+      `⚠️ *Weekly Report — No Users Registered*\n\n` +
+      `No users found in database.\n\n` +
+      `*How to fix:*\n` +
+      `Settings → Secrets → Actions → New repository secret\n\n` +
+      `Name: \`GH_USERS\`\n` +
+      `Value: \`1398648318:+13125551234\`\n\n` +
+      `_🤖 via GitHub Actions_`;
+    for (const adminId of config.bot.adminIds) {
+      try { await tgSend(adminId, msg); } catch {}
+    }
     process.exit(0);
   }
+
+  log.info(`Processing ${users.length} user(s): ${users.map(u => u.telegram_id).join(', ')}`);
 
   for (const user of users) {
     try {
@@ -60,34 +73,33 @@ async function main() {
 }
 
 async function processWeeklyForUser(user, weekStart, weekEnd) {
-  const telegramId = user.telegram_id;
+  const telegramId  = user.telegram_id;
   const forceResend = process.env.FORCE_RESEND === 'true';
 
-  log.info(`Processing weekly for ${telegramId}: ${weekStart} → ${weekEnd}`);
+  log.info(`User ${telegramId} | ${weekStart} → ${weekEnd}`);
 
   if (db.weeklyReviewExists(telegramId, weekStart) && !forceResend) {
-    log.info(`Weekly review already exists for week ${weekStart}, skipping`);
+    log.info(`Weekly already exists for week ${weekStart}, skipping`);
     return;
   }
 
-  // ── Step 1: Ensure daily reviews exist for each working day ───────────────
-  // If daily workflow didn't run on some days, generate those summaries now.
+  // ── Ensure daily reviews exist for each working day ───────────────────────
   const workingDays = getWorkingDays(weekStart, weekEnd);
-  log.info(`Week has ${workingDays.length} working days: ${workingDays.join(', ')}`);
+  log.info(`Working days: ${workingDays.join(', ')}`);
 
   for (const dayStr of workingDays) {
     if (!db.dailyReviewExists(telegramId, dayStr)) {
-      log.info(`No daily review for ${dayStr} — generating now...`);
+      log.info(`No daily review for ${dayStr} — generating now`);
       await generateDayReview(user, dayStr);
       await sleep(2000);
     } else {
-      log.info(`Daily review for ${dayStr} exists ✓`);
+      log.info(`Daily review for ${dayStr} ✓`);
     }
   }
 
-  // ── Step 2: Get all daily reviews ────────────────────────────────────────
+  // ── Get all daily reviews ─────────────────────────────────────────────────
   const dailyReviews = db.getDailyReviews(telegramId, weekStart, weekEnd);
-  log.info(`${dailyReviews.length} daily reviews collected`);
+  log.info(`Collected ${dailyReviews.length} daily reviews`);
 
   if (dailyReviews.length === 0) {
     await tgSend(telegramId,
@@ -97,11 +109,11 @@ async function processWeeklyForUser(user, weekStart, weekEnd) {
     return;
   }
 
-  // ── Step 3: Generate weekly GPT summary ──────────────────────────────────
+  // ── Generate weekly GPT summary ───────────────────────────────────────────
   log.info('Generating weekly summary...');
-  const result = await generateWeeklySummary(dailyReviews, weekStart, weekEnd);
-
+  const result     = await generateWeeklySummary(dailyReviews, weekStart, weekEnd);
   const totalCalls = dailyReviews.reduce((s, r) => s + (r.total_calls || 0), 0);
+
   db.saveWeeklyReview(telegramId, weekStart, weekEnd, result.summary, result.overallScore, totalCalls);
 
   const scoreStr = result.overallScore !== null
@@ -119,21 +131,13 @@ async function processWeeklyForUser(user, weekStart, weekEnd) {
   log.info(`✅ Weekly report sent to ${telegramId}`);
 }
 
-/**
- * Generate and save a daily review for a specific day.
- * Fetches + analyzes calls if needed.
- */
 async function generateDayReview(user, dayStr) {
   const telegramId = user.telegram_id;
-
-  // Sync that day's shift calls
   const { dateFrom, dateTo } = todayShiftUtcRange(dayStr);
   log.info(`Syncing ${dayStr}: ${dateFrom} → ${dateTo}`);
   await syncAndAnalyzeCalls(user, dateFrom, dateTo);
 
-  const calls = db.getCallsForDate(telegramId, dayStr);
-  log.info(`${dayStr}: ${calls.length} analyzed calls`);
-
+  const calls    = db.getCallsForDate(telegramId, dayStr);
   const enriched = calls.map(c => ({
     ...c, durationSeconds: c.duration_seconds, analysis: safeJson(c.analysis_json)
   }));
@@ -150,19 +154,13 @@ async function generateDayReview(user, dayStr) {
   log.info(`Daily review saved for ${dayStr} (${result.totalCalls} calls, score: ${result.overallScore})`);
 }
 
-/**
- * Returns array of date strings (YYYY-MM-DD) for Mon-Sat in the given range.
- */
 function getWorkingDays(weekStart, weekEnd) {
   const days = [];
-  const start = new Date(weekStart + 'T12:00:00Z');
-  const end   = new Date(weekEnd   + 'T12:00:00Z');
-  const cur   = new Date(start);
+  const cur  = new Date(weekStart + 'T12:00:00Z');
+  const end  = new Date(weekEnd   + 'T12:00:00Z');
   while (cur <= end) {
-    const dow = cur.getUTCDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-    if (dow >= 1 && dow <= 6) { // Mon–Sat
-      days.push(cur.toISOString().slice(0, 10));
-    }
+    const dow = cur.getUTCDay();
+    if (dow >= 1 && dow <= 6) days.push(cur.toISOString().slice(0, 10));
     cur.setUTCDate(cur.getUTCDate() + 1);
   }
   return days;

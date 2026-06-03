@@ -179,6 +179,18 @@ async function runEndOfShiftJob(bot) {
       }
 
       logger.info(`Daily report sent to ${telegramId} (${calls.length} calls, avg: ${avgScore})`);
+
+      // ── Cleanup: delete today's calls after report is sent ─────────────────
+      // Ensures tomorrow's report contains only tomorrow's calls.
+      // daily_reviews table is preserved for the weekly report.
+      try {
+        const deleted = db.deleteCallsForDate(telegramId, today);
+        logger.info(`🧹 Cleanup: removed ${deleted} call records for ${today}`);
+        const old = db.deleteCallsOlderThan(2);
+        if (old > 0) logger.info(`🧹 Cleanup: removed ${old} stale calls older than 2 days`);
+      } catch (cleanErr) {
+        logger.warn(`Cleanup error: ${cleanErr.message}`);
+      }
     } catch (err) {
       logger.error(`End-of-shift error for ${telegramId}: ${err.message}`);
     }

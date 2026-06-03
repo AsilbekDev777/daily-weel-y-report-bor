@@ -268,6 +268,32 @@ function setLastSyncedAt(telegramId, isoString) {
   `).run(telegramId, isoString);
 }
 
+/**
+ * Delete all call records for a CT date after daily report is sent.
+ * Keeps daily_reviews and weekly_reviews intact for weekly report.
+ */
+function deleteCallsForDate(telegramId, dateStr) {
+  const dayjs = require('dayjs');
+  const utc   = require('dayjs/plugin/utc');
+  const tz    = require('dayjs/plugin/timezone');
+  dayjs.extend(utc); dayjs.extend(tz);
+  const startOfDay = dayjs.tz(dateStr + ' 00:00:00', 'America/Chicago').toISOString();
+  const endOfDay   = dayjs.tz(dateStr + ' 23:59:59', 'America/Chicago').toISOString();
+  const result = getDb().prepare(`
+    DELETE FROM calls WHERE telegram_id = ? AND start_time >= ? AND start_time <= ?
+  `).run(telegramId, startOfDay, endOfDay);
+  return result.changes;
+}
+
+/**
+ * Safety net: delete calls older than N days.
+ */
+function deleteCallsOlderThan(days) {
+  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+  const result = getDb().prepare(`DELETE FROM calls WHERE start_time < ?`).run(cutoff);
+  return result.changes;
+}
+
 module.exports = {
   getDb,
   upsertUser,
@@ -285,5 +311,7 @@ module.exports = {
   dailyReviewExists,
   saveWeeklyReview,
   getLastSyncedAt,
-  setLastSyncedAt
+  setLastSyncedAt,
+  deleteCallsForDate,
+  deleteCallsOlderThan
 };

@@ -166,11 +166,37 @@ function getDb() {
   if (_db) return _db;
   const dbPath = path.resolve(config.bot.databasePath);
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  _db = new Database(dbPath);
-  _db.pragma('journal_mode = WAL');
-  _db.pragma('foreign_keys = ON');
-  _initSchema(_db);
-  log.info(`DB ready: ${dbPath}`);
+
+  // FIX: handle corrupted/malformed SQLite from bad cache restore
+  try {
+    _db = new Database(dbPath);
+    _db.pragma('journal_mode = WAL');
+    _db.pragma('foreign_keys = ON');
+    // Integrity check — catches "malformed image" before any real query
+    const check = _db.prepare('PRAGMA integrity_check').get();
+    if (!check || check.integrity_check !== 'ok') {
+      throw new Error(`Integrity check failed: ${JSON.stringify(check)}`);
+    }
+    _initSchema(_db);
+    log.info(`DB ready: ${dbPath}`);
+  } catch (e) {
+    log.warn(`DB corrupted (${e.message}) — deleting and recreating fresh DB`);
+    try { if (_db) { _db.close(); } } catch {}
+    _db = null;
+    // Backup corrupted file for debugging
+    if (fs.existsSync(dbPath)) {
+      const backup = dbPath + '.corrupt.' + Date.now();
+      fs.renameSync(dbPath, backup);
+      log.warn(`Corrupted DB backed up to: ${backup}`);
+    }
+    // Create fresh DB
+    _db = new Database(dbPath);
+    _db.pragma('journal_mode = WAL');
+    _db.pragma('foreign_keys = ON');
+    _initSchema(_db);
+    log.info(`Fresh DB created: ${dbPath}`);
+  }
+
   return _db;
 }
 
@@ -343,6 +369,33 @@ const db = {
       INSERT INTO sync_state (telegram_id, last_synced_at) VALUES (?,?)
       ON CONFLICT(telegram_id) DO UPDATE SET last_synced_at=excluded.last_synced_at
     `).run(telegramId, iso);
+  },
+
+  /**
+   * Delete all call records for a specific CT date after daily report is sent.
+   * Keeps daily_reviews and weekly_reviews intact (needed for weekly report).
+   * This ensures the next day starts with a clean slate.
+   */
+  deleteCallsForDate(telegramId, ctDateStr) {
+    const { dateFrom, dateTo } = ctDayToUtcRange(ctDateStr);
+    const result = getDb().prepare(`
+      DELETE FROM calls
+      WHERE telegram_id = ? AND start_time >= ? AND start_time <= ?
+    `).run(telegramId, dateFrom, dateTo);
+    log.info(`Cleanup: deleted ${result.changes} calls for ${telegramId} on ${ctDateStr}`);
+    return result.changes;
+  },
+
+  /**
+   * Safety net: delete all calls older than N days to prevent DB growing indefinitely.
+   */
+  deleteCallsOlderThan(days) {
+    const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+    const result = getDb().prepare(`DELETE FROM calls WHERE start_time < ?`).run(cutoff);
+    if (result.changes > 0) {
+      log.info(`Cleanup: deleted ${result.changes} calls older than ${days} days`);
+    }
+    return result.changes;
   }
 };
 

@@ -1,0 +1,54 @@
+name: Diagnose Bot Setup
+
+on:
+  workflow_dispatch:  # Only manual trigger
+
+jobs:
+  diagnose:
+    name: Check All Connections
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Restore DB cache
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ./data/bot.sqlite
+          key: bot-db-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            bot-db-${{ runner.os }}-
+
+      - name: Create data dirs
+        run: mkdir -p data/recordings data/logs
+
+      - name: Run diagnostics
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OPENAI_API_KEY:     ${{ secrets.OPENAI_API_KEY }}
+          RC_SERVER_URL:      https://platform.ringcentral.com
+          RC_CLIENT_ID:       ${{ secrets.RC_CLIENT_ID }}
+          RC_CLIENT_SECRET:   ${{ secrets.RC_CLIENT_SECRET }}
+          RC_JWT:             ${{ secrets.RC_JWT }}
+          DATABASE_PATH:      ./data/bot.sqlite
+          DOWNLOAD_DIR:       ./data/recordings
+          RC_REQUESTS_PER_MINUTE: '4'
+          RC_PER_PAGE:        '100'
+          RC_MAX_PAGES:       '10'
+          OPENAI_ANALYSIS_MODEL:      gpt-4o-mini
+          OPENAI_TRANSCRIPTION_MODEL: gpt-4o-mini-transcribe
+          DEBUG_MODE:         'true'
+          GH_USERS:           ${{ secrets.GH_USERS }}
+          ADMIN_TELEGRAM_IDS: ${{ secrets.ADMIN_TELEGRAM_IDS }}
+        run: node scripts/gh-diagnose.js

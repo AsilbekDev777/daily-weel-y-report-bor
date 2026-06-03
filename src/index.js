@@ -59,7 +59,7 @@ async function main() {
     logger.info('========================================');
     logger.info('  RingCentral Call Review Bot');
     logger.info('========================================');
-    logger.info(`Shift hours: 8:00 AM – 6:00 PM (CT)`);
+    logger.info(`Shift hours: 9:00 AM – 7:00 PM (CT)`);
     logger.info(`Poll interval: ${config.bot.pollCron}`);
     logger.info(`Max analyze per sync: ${config.bot.maxAnalyzePerSync}`);
     logger.info(`Min call duration: ${config.bot.minCallDurationSeconds}s`);
@@ -83,7 +83,7 @@ async function main() {
           adminId,
           `🤖 *Call Review Bot started*\n\n` +
           `✅ All systems operational\n` +
-          `🕐 Shift: 8:00 AM – 6:00 PM CT\n` +
+          `🕐 Shift: 9:00 AM – 7:00 PM CT\n` +
           `🔄 Poll: ${config.bot.pollCron}\n` +
           `📅 ${new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' })} CT`,
           { parse_mode: 'Markdown' }

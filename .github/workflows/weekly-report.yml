@@ -2,10 +2,10 @@ name: Weekly Performance Report
 
 on:
   schedule:
-    # Saturday 7:05 PM CT (CDT=UTC-5) = Sunday 00:05 UTC
+    # Saturday 6:05 PM CT (CDT=UTC-5) = Saturday 23:05 UTC
+    - cron: '5 23 * * 6'
+    # Saturday 6:05 PM CT (CST=UTC-6) = Sunday 00:05 UTC
     - cron: '5 0 * * 0'
-    # Saturday 7:05 PM CT (CST=UTC-6) = Sunday 01:05 UTC
-    - cron: '5 1 * * 0'
 
   workflow_dispatch:
     inputs:
@@ -17,6 +17,10 @@ on:
         description: 'Week end (YYYY-MM-DD, Saturday). Leave empty for auto.'
         required: false
         default: ''
+      force_resend:
+        description: 'Resend even if already sent (true/false)'
+        required: false
+        default: 'false'
 
 jobs:
   weekly-report:
@@ -54,6 +58,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_ANALYSIS_MODEL: gpt-4o-mini
+          OPENAI_TRANSCRIPTION_MODEL: gpt-4o-mini-transcribe
           RC_SERVER_URL: https://platform.ringcentral.com
           RC_CLIENT_ID: ${{ secrets.RC_CLIENT_ID }}
           RC_CLIENT_SECRET: ${{ secrets.RC_CLIENT_SECRET }}
@@ -63,13 +68,15 @@ jobs:
           RC_REQUESTS_PER_MINUTE: '4'
           RC_PER_PAGE: '100'
           RC_MAX_PAGES: '10'
+          MIN_CALL_DURATION_SECONDS: '60'
+          MAX_AUDIO_MB: '25'
           DEBUG_MODE: 'false'
           GH_ACTIONS_MODE: 'true'
           ADMIN_TELEGRAM_IDS: ${{ secrets.ADMIN_TELEGRAM_IDS }}
           GH_USERS: ${{ secrets.GH_USERS }}
-          FORCE_RESEND: ${{ github.event.inputs.force_resend }}
           WEEK_START_OVERRIDE: ${{ github.event.inputs.week_start }}
           WEEK_END_OVERRIDE: ${{ github.event.inputs.week_end }}
+          FORCE_RESEND: ${{ github.event.inputs.force_resend }}
         run: node scripts/gh-weekly.js
 
       - name: Save DB cache

@@ -36,7 +36,7 @@ const config = {
     downloadDir: process.env.DOWNLOAD_DIR || './data/recordings',
     maxAudioMb: parseInt(process.env.MAX_AUDIO_MB) || 25,
     maxAnalyzePerSync: parseInt(process.env.MAX_ANALYZE_PER_SYNC) || 4,
-    minCallDurationSeconds: parseInt(process.env.MIN_CALL_DURATION_SECONDS) || 15
+    minCallDurationSeconds: parseInt(process.env.MIN_CALL_DURATION_SECONDS) || 60
   },
   // Shift hours in Central Time
   shift: {

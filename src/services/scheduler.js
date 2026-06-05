@@ -39,15 +39,15 @@ function startScheduler(bot) {
 
   // ─── End-of-shift: exact cron "0 19 * * *" in CT timezone ───────────────
   // FIX: was polling every minute with isShiftEnd() check — unreliable.
-  // Now uses a proper cron expression fired ONCE at exactly 19:00 CT.
-  shiftEndJob = cron.schedule('0 19 * * *', async () => {
+  // Now uses a proper cron expression fired ONCE at exactly 18:00 CT.
+  shiftEndJob = cron.schedule('0 18 * * *', async () => {
     if (endOfShiftRunning) {
       logger.warn('End-of-shift already running, skipping duplicate');
       return;
     }
     endOfShiftRunning = true;
     try {
-      logger.info('19:00 CT — running end-of-shift job');
+      logger.info('18:00 CT — running end-of-shift job');
       await worker.runEndOfShiftJob(bot);
 
       // Saturday: run weekly report right after daily
@@ -55,7 +55,7 @@ function startScheduler(bot) {
         if (!weeklyRunning) {
           weeklyRunning = true;
           try {
-            logger.info('Saturday 19:00 CT — running weekly summary job');
+            logger.info('Saturday 18:00 CT — running weekly summary job');
             await new Promise(r => setTimeout(r, 5000));
             await worker.runWeeklyJob(bot);
           } catch (err) {
@@ -74,8 +74,8 @@ function startScheduler(bot) {
 
   logger.info('Scheduler started:');
   logger.info(`  Poll:         ${config.bot.pollCron} CT (shift hours only)`);
-  logger.info('  End-of-shift: 0 19 * * * CT (fires once at 19:00 CT)');
-  logger.info('  Weekly:       after 19:00 CT every Saturday');
+  logger.info('  End-of-shift: 0 19 * * * CT (fires once at 18:00 CT)');
+  logger.info('  Weekly:       after 18:00 CT every Saturday');
 }
 
 function stopScheduler() {

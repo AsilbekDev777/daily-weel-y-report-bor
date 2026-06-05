@@ -2,20 +2,20 @@ name: End-of-Shift Daily Report
 
 on:
   schedule:
-    # 7:00 PM CT (CDT=UTC-5) = 00:00 UTC (next day)
-    - cron: '0 0 * * 2'   # Monday    CT → Tuesday    00:00 UTC
-    - cron: '0 0 * * 3'   # Tuesday   CT → Wednesday  00:00 UTC
-    - cron: '0 0 * * 4'   # Wednesday CT → Thursday   00:00 UTC
-    - cron: '0 0 * * 5'   # Thursday  CT → Friday     00:00 UTC
-    - cron: '0 0 * * 6'   # Friday    CT → Saturday   00:00 UTC
-    - cron: '0 0 * * 0'   # Saturday  CT → Sunday     00:00 UTC
-    # 7:00 PM CT (CST=UTC-6) = 01:00 UTC (next day)
-    - cron: '0 1 * * 2'
-    - cron: '0 1 * * 3'
-    - cron: '0 1 * * 4'
-    - cron: '0 1 * * 5'
-    - cron: '0 1 * * 6'
-    - cron: '0 1 * * 0'
+    # 6:00 PM CT (CDT=UTC-5) = 23:00 UTC same day
+    - cron: '0 23 * * 1'   # Monday    CT
+    - cron: '0 23 * * 2'   # Tuesday   CT
+    - cron: '0 23 * * 3'   # Wednesday CT
+    - cron: '0 23 * * 4'   # Thursday  CT
+    - cron: '0 23 * * 5'   # Friday    CT
+    - cron: '0 23 * * 6'   # Saturday  CT
+    # 6:00 PM CT (CST=UTC-6) = 00:00 UTC next day
+    - cron: '0 0 * * 2'    # Monday    CT (CST)
+    - cron: '0 0 * * 3'    # Tuesday   CT (CST)
+    - cron: '0 0 * * 4'    # Wednesday CT (CST)
+    - cron: '0 0 * * 5'    # Thursday  CT (CST)
+    - cron: '0 0 * * 6'    # Friday    CT (CST)
+    - cron: '0 0 * * 0'    # Saturday  CT (CST)
 
   workflow_dispatch:
     inputs:
@@ -23,6 +23,10 @@ on:
         description: 'Date (YYYY-MM-DD). Leave empty for today CT.'
         required: false
         default: ''
+      force_resend:
+        description: 'Resend even if already sent (true/false)'
+        required: false
+        default: 'false'
 
 jobs:
   daily-report:
@@ -60,6 +64,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_ANALYSIS_MODEL: gpt-4o-mini
+          OPENAI_TRANSCRIPTION_MODEL: gpt-4o-mini-transcribe
           RC_SERVER_URL: https://platform.ringcentral.com
           RC_CLIENT_ID: ${{ secrets.RC_CLIENT_ID }}
           RC_CLIENT_SECRET: ${{ secrets.RC_CLIENT_SECRET }}
@@ -69,13 +74,14 @@ jobs:
           RC_REQUESTS_PER_MINUTE: '4'
           RC_PER_PAGE: '100'
           RC_MAX_PAGES: '10'
-          MIN_CALL_DURATION_SECONDS: '15'
+          MIN_CALL_DURATION_SECONDS: '60'
+          MAX_AUDIO_MB: '25'
           DEBUG_MODE: 'false'
           GH_ACTIONS_MODE: 'true'
           ADMIN_TELEGRAM_IDS: ${{ secrets.ADMIN_TELEGRAM_IDS }}
           GH_USERS: ${{ secrets.GH_USERS }}
-          FORCE_RESEND: ${{ github.event.inputs.force_resend }}
           DATE_OVERRIDE: ${{ github.event.inputs.date_override }}
+          FORCE_RESEND: ${{ github.event.inputs.force_resend }}
         run: node scripts/gh-daily.js
 
       - name: Save DB cache

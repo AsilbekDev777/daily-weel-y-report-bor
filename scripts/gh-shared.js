@@ -33,7 +33,7 @@ const config = {
     downloadDir:           process.env.DOWNLOAD_DIR               || './data/recordings',
     maxAudioMb:            parseInt(process.env.MAX_AUDIO_MB      || '25'),
     maxAnalyzePerSync:     parseInt(process.env.MAX_ANALYZE_PER_SYNC || '4'),
-    minCallDurationSeconds:parseInt(process.env.MIN_CALL_DURATION_SECONDS || '15'),
+    minCallDurationSeconds:parseInt(process.env.MIN_CALL_DURATION_SECONDS || '60'),
     lookbackMinutes:       parseInt(process.env.LOOKBACK_MINUTES  || '45'),
     backfillDays:          parseInt(process.env.BACKFILL_DAYS     || '7'),
     // GH_USERS = "TELEGRAM_ID:PHONE" pairs comma-separated
@@ -42,7 +42,7 @@ const config = {
     adminIds: (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
     debug:    process.env.DEBUG_MODE === 'true'
   },
-  shift: { startHour: 9, endHour: 19, tz: 'America/Chicago' }
+  shift: { startHour: 8, endHour: 18, tz: 'America/Chicago' }
 };
 
 // ─── Logger ───────────────────────────────────────────────────────────────────

@@ -683,7 +683,7 @@ module.exports = {
   todayDateCT, currentHourCT, isShiftActive,
   ctDayToUtcRange, todayShiftUtcRange,
   lookbackRange, lastNDaysRange, weekRangeEndingSaturday, sleep,
-  fetchCallLogs, downloadRecording, parseRecord,
+  getRcToken, fetchCallLogs, downloadRecording, parseRecord,
   transcribeAudio, analyzeCall,
   generateDailySummary, generateWeeklySummary,
   syncAndAnalyzeCalls, analyzeSilently,

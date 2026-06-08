@@ -40,36 +40,37 @@ async function transcribeAudio(filePath) {
 async function analyzeCall(transcription, callMeta = {}) {
   logger.info('Analyzing call transcription with GPT...');
 
-  const systemPrompt = `You are a professional call quality analyst. Your task is to evaluate a customer service call transcript.
+  // Load company-specific evaluation criteria from HR_2025 training manual
+  const { CALL_CRITERIA } = require('../config/call_criteria');
 
-Analyze the following aspects:
-1. **Profanity** – Did the agent use any profanity, swear words, or inappropriate language? List exact words if found.
-2. **Manners** – Was the agent polite, respectful, and professional?
-3. **Communication** – Was the agent clear, concise, and helpful?
-4. **Overall behavior** – How did the agent handle the interaction overall?
+  const systemPrompt = `You are a professional call quality analyst for American Freight Way / DRENIX, a trucking carrier.
+Your job is to evaluate recruiter calls against the company's official HR training standards.
 
-Respond ONLY with a valid JSON object (no markdown, no explanation outside JSON) in this exact format:
+${CALL_CRITERIA}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+YOUR TASK
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Evaluate the recruiter's performance on this call against ALL criteria above.
+Be specific — reference what the recruiter did or said, not generic advice.
+
+Respond ONLY with a valid JSON object (no markdown, no explanation outside JSON):
 {
   "score": <integer 0-100>,
   "profanity_detected": <true|false>,
-  "profanity_words": [<list of exact profane words found, empty array if none>],
+  "profanity_words": [<exact words used, empty array if none>],
   "manners_rating": "<Excellent|Good|Fair|Poor>",
   "communication_rating": "<Excellent|Good|Fair|Poor>",
-  "behavior_summary": "<2-3 sentence summary of agent behavior>",
-  "strengths": "<what the agent did well>",
-  "weaknesses": "<what needs improvement, or 'None identified'>",
-  "advice": "<specific actionable advice for improvement>",
+  "tone_rating": "<Excellent|Good|Fair|Poor>",
+  "listening_rating": "<Excellent|Good|Fair|Poor>",
+  "structure_followed": <true|false>,
+  "behavior_summary": "<2-3 sentences on recruiter behavior vs company standards>",
+  "strengths": "<specific things the recruiter did right per company criteria>",
+  "weaknesses": "<specific violations of company standards, or None identified>",
+  "criteria_violations": [<list of specific rules broken from the criteria above>],
+  "advice": "<specific actionable advice referencing company standards>",
   "short_review": "<1-2 sentence overall review>"
-}
-
-Scoring guide:
-- 90-100: Excellent – professional, polite, effective
-- 75-89: Good – mostly professional with minor issues
-- 60-74: Fair – acceptable but needs improvement
-- 40-59: Poor – significant issues in communication or behavior
-- 0-39: Unacceptable – serious violations (profanity, rudeness, etc.)
-
-If profanity is detected, score must be below 60 regardless of other factors.`;
+}`;
 
   const userMessage = `Call metadata:
 - Direction: ${callMeta.direction || 'Unknown'}

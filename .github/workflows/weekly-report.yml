@@ -57,8 +57,8 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_ANALYSIS_MODEL: gpt-4o-mini
-          OPENAI_TRANSCRIPTION_MODEL: gpt-4o-mini-transcribe
+          OPENAI_ANALYSIS_MODEL: gpt-5.5
+          OPENAI_TRANSCRIPTION_MODEL: gpt-4o-transcribe
           RC_SERVER_URL: https://platform.ringcentral.com
           RC_CLIENT_ID: ${{ secrets.RC_CLIENT_ID }}
           RC_CLIENT_SECRET: ${{ secrets.RC_CLIENT_SECRET }}

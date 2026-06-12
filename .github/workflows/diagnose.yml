@@ -46,8 +46,8 @@ jobs:
           RC_REQUESTS_PER_MINUTE: '4'
           RC_PER_PAGE:        '100'
           RC_MAX_PAGES:       '10'
-          OPENAI_ANALYSIS_MODEL:      gpt-4o-mini
-          OPENAI_TRANSCRIPTION_MODEL: gpt-4o-mini-transcribe
+          OPENAI_ANALYSIS_MODEL: gpt-5.5
+          OPENAI_TRANSCRIPTION_MODEL: gpt-4o-transcribe
           DEBUG_MODE:         'true'
           GH_USERS:           ${{ secrets.GH_USERS }}
           ADMIN_TELEGRAM_IDS: ${{ secrets.ADMIN_TELEGRAM_IDS }}

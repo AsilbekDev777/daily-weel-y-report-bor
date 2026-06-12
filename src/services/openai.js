@@ -4,275 +4,297 @@ const OpenAI = require('openai');
 const fs = require('fs');
 const config = require('../utils/config');
 const logger = require('../utils/logger');
+const { CALL_CRITERIA, FOLLOWUP_CRITERIA } = require('../config/call_criteria');
 
 const openai = new OpenAI({
   apiKey: config.openai.apiKey,
   timeout: config.openai.requestTimeoutMs
 });
 
-/**
- * Transcribe an audio file using Whisper
- */
+const WORDS_SHORT  = 2500;
+const WORDS_MEDIUM = 6000;
+
+// ─── Transcription ─────────────────────────────────────────────────────────
+
 async function transcribeAudio(filePath) {
   logger.info(`Transcribing: ${filePath}`);
   try {
-    const fileStream = fs.createReadStream(filePath);
     const response = await openai.audio.transcriptions.create({
-      file: fileStream,
+      file: fs.createReadStream(filePath),
       model: config.openai.transcriptionModel,
       language: 'en',
       response_format: 'text'
     });
-
-    const text = typeof response === 'string' ? response : response.text || '';
-    logger.info(`Transcription done (${text.length} chars)`);
+    const text = typeof response === 'string' ? response : (response.text || '');
+    logger.info(`Transcription done: ${text.trim().split(/\s+/).length} words`);
     return text;
   } catch (err) {
-    logger.error(`transcribeAudio error: ${err.message}`);
+    logger.error(`transcribeAudio: ${err.message}`);
     throw err;
   }
 }
 
-/**
- * Analyze a single call transcription
- * Returns { score, profanity, profanityWords, manners, behavior, advice, summary }
- */
+// ─── Transcript compression for long calls ─────────────────────────────────
+
+async function compressTranscript(transcription) {
+  const words = transcription.trim().split(/\s+/).length;
+  logger.info(`Transcript: ${words} words`);
+
+  if (words <= WORDS_SHORT) {
+    return { text: transcription, compressed: false, words };
+  }
+
+  logger.info(`Long call (${words} words) — extracting quality-relevant excerpts...`);
+  const isDeep = words > WORDS_MEDIUM;
+
+  const prompt = isDeep
+    ? `Extract VERBATIM excerpts for quality evaluation from this long call transcript.
+Pull exact quotes (not paraphrases) for:
+1. OPENING — first ~60 seconds as spoken
+2. PITCH MOMENTS — exact recruiter statements about company/offer/pay
+3. OBJECTION HANDLING — exact exchanges when driver pushes back
+4. TONE/ENERGY — any moments of frustration, rudeness, warmth, or energy shifts
+5. PROFANITY/VIOLATIONS — copy exact words if any used
+6. CLOSING — last ~60 seconds as spoken
+7. RED FLAGS — interrupting, defensiveness, complaints, no next step
+Total: 400-600 words max. Use exact quotes, not summaries.`
+    : `Extract verbatim quality-evaluation excerpts:
+1. OPENING (~45 sec)
+2. KEY RECRUITER STATEMENTS
+3. OBJECTION HANDLING
+4. PROFANITY/VIOLATIONS (exact words)
+5. CLOSING/NEXT STEP (~45 sec)
+Total: 300-500 words. Exact quotes only.`;
+
+  try {
+    const resp = await openai.chat.completions.create({
+      model: config.openai.analysisModel,
+      messages: [
+        { role: 'system', content: prompt },
+        { role: 'user', content: `Transcript (${words} words):\n---\n${transcription}\n---` }
+      ],
+      temperature: 0.1,
+      max_tokens: 1200
+    });
+    const compressed = resp.choices[0]?.message?.content || transcription.slice(0, 8000);
+    logger.info(`Compressed: ${words} → ${compressed.trim().split(/\s+/).length} words`);
+    return { text: compressed, compressed: true, words };
+  } catch (err) {
+    logger.warn(`Compression failed (${err.message}) — using first 8000 chars`);
+    return { text: transcription.slice(0, 8000), compressed: true, words };
+  }
+}
+
+// ─── Call analysis ──────────────────────────────────────────────────────────
+
 async function analyzeCall(transcription, callMeta = {}) {
-  logger.info('Analyzing call transcription with GPT...');
+  logger.info(`Analyzing call (${callMeta.durationSeconds || 0}s)...`);
 
-  // Load company-specific evaluation criteria from HR_2025 training manual
-  const { CALL_CRITERIA } = require('../config/call_criteria');
+  const { text: prepared, compressed, words } = await compressTranscript(transcription);
 
-  const systemPrompt = `You are a professional call quality analyst for American Freight Way / DRENIX, a trucking carrier.
-Your job is to evaluate recruiter calls against the company's official HR training standards.
+  const SYSTEM = `You are a professional call quality analyst for American Freight Way / DRENIX trucking carrier.
+Evaluate recruiter calls against the company official HR training standards.
 
 ${CALL_CRITERIA}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-YOUR TASK
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Evaluate the recruiter's performance on this call against ALL criteria above.
-Be specific — reference what the recruiter did or said, not generic advice.
+${FOLLOWUP_CRITERIA}
 
-Respond ONLY with a valid JSON object (no markdown, no explanation outside JSON):
+YOUR TASK:
+STEP 1 — DETECT CALL TYPE:
+  first_contact      = Cold call, recruiter introduces company for first time
+  warm_outreach      = Re-engaging cold/ghosted lead with new specific value
+  objection_followup = Returning to address a specific objection from last call
+  document_collection = Collecting CDL, medical card, MVR, clearinghouse consent, etc.
+  status_check       = Checking MVR/drug test/insurance/contract/safety approval status
+  onboarding         = Driver approved — orientation, ELD, first dispatch, fuel card
+  active_checkin     = Driver running — settlement, loads, dispatch, compliance
+  retention          = Driver unhappy or at risk of leaving — save call
+  nurture            = Brief low-pressure check-in for parked leads not ready yet
+
+STEP 2 — APPLY CORRECT CRITERIA for the detected type.
+  Do NOT penalize pipeline calls for not pitching — not their purpose.
+  Do NOT penalize check-in calls for not qualifying — driver already signed.
+  Do NOT evaluate a warm outreach as if it were a cold first contact.
+
+STEP 3 — Respond ONLY with valid JSON, no markdown:
 {
-  "score": <integer 0-100>,
-  "profanity_detected": <true|false>,
-  "profanity_words": [<exact words used, empty array if none>],
+  "call_type": "<type>",
+  "call_type_label": "<human readable>",
+  "score": <0-100>,
+  "profanity_detected": <bool>,
+  "profanity_words": [],
   "manners_rating": "<Excellent|Good|Fair|Poor>",
   "communication_rating": "<Excellent|Good|Fair|Poor>",
   "tone_rating": "<Excellent|Good|Fair|Poor>",
   "listening_rating": "<Excellent|Good|Fair|Poor>",
-  "structure_followed": <true|false>,
-  "behavior_summary": "<2-3 sentences on recruiter behavior vs company standards>",
-  "strengths": "<specific things the recruiter did right per company criteria>",
-  "weaknesses": "<specific violations of company standards, or None identified>",
-  "criteria_violations": [<list of specific rules broken from the criteria above>],
-  "advice": "<specific actionable advice referencing company standards>",
+  "energy_rating": "<Excellent|Good|Fair|Poor>",
+  "call_purpose_clear": <bool>,
+  "next_step_given": <bool>,
+  "behavior_summary": "<2-3 sentences vs correct call type criteria>",
+  "strengths": "<specific things recruiter did right>",
+  "weaknesses": "<specific violations or None identified>",
+  "criteria_violations": [],
+  "advice": "<actionable advice for this call type>",
   "short_review": "<1-2 sentence overall review>"
 }`;
 
-  const userMessage = `Call metadata:
-- Direction: ${callMeta.direction || 'Unknown'}
-- Duration: ${callMeta.durationSeconds || 0} seconds
-- Date: ${callMeta.startTime || 'Unknown'}
+  const compressionNote = compressed
+    ? `[Long call ~${Math.round(words / 130)} min — key excerpts extracted for analysis]`
+    : '';
 
-Call transcript:
-"""
-${transcription}
-"""
-
-Analyze this call and return the JSON evaluation.`;
+  const USER = [
+    `Direction: ${callMeta.direction || 'Unknown'} | Duration: ${callMeta.durationSeconds || 0}s | Date: ${callMeta.startTime || 'Unknown'}`,
+    compressionNote,
+    '',
+    'Transcript:',
+    '---',
+    prepared,
+    '---',
+    'Detect call type, then evaluate.'
+  ].filter(Boolean).join('\n');
 
   try {
     const response = await openai.chat.completions.create({
       model: config.openai.analysisModel,
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage }
+        { role: 'system', content: SYSTEM },
+        { role: 'user',   content: USER }
       ],
       temperature: 0.3,
-      max_tokens: 800
+      max_tokens: 1500
     });
 
     const raw = response.choices[0]?.message?.content || '{}';
     let parsed;
     try {
-      // Strip any accidental markdown code fences
-      const cleaned = raw.replace(/```json|```/g, '').trim();
-      parsed = JSON.parse(cleaned);
+      parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
     } catch (e) {
-      logger.error(`Failed to parse GPT analysis JSON: ${raw}`);
-      parsed = {
-        score: 50,
-        profanity_detected: false,
-        profanity_words: [],
-        manners_rating: 'Fair',
-        communication_rating: 'Fair',
-        behavior_summary: 'Analysis could not be fully parsed.',
-        strengths: 'Unable to determine',
-        weaknesses: 'Unable to determine',
-        advice: 'Please review the transcript manually.',
-        short_review: 'Automated analysis encountered an issue.'
-      };
+      logger.error(`JSON parse fail: ${raw.slice(0, 200)}`);
+      parsed = fallbackAnalysis(`JSON parse error: ${e.message}`);
     }
 
-    logger.info(`Call analysis complete. Score: ${parsed.score}`);
+    logger.info(`Done. Type: ${parsed.call_type} | Score: ${parsed.score}`);
     return parsed;
   } catch (err) {
     logger.error(`analyzeCall error: ${err.message}`);
-    throw err;
+    return fallbackAnalysis(err.message);
   }
 }
 
-/**
- * Generate a daily shift summary from all call reviews
- */
-async function generateDailySummary(callReviews, shiftDate) {
-  logger.info(`Generating daily summary for ${shiftDate} (${callReviews.length} calls)`);
+function fallbackAnalysis(reason) {
+  return {
+    call_type: 'first_contact',
+    call_type_label: 'Unknown — Manual Review Required',
+    score: 0,
+    profanity_detected: false,
+    profanity_words: [],
+    manners_rating: 'Fair',
+    communication_rating: 'Fair',
+    tone_rating: 'Fair',
+    listening_rating: 'Fair',
+    energy_rating: 'Fair',
+    call_purpose_clear: false,
+    next_step_given: false,
+    behavior_summary: `Analysis error: ${reason}. Manual review required.`,
+    strengths: 'Unable to determine',
+    weaknesses: 'Unable to determine — manual review required',
+    criteria_violations: [],
+    advice: 'Please review this call manually.',
+    short_review: 'Automated analysis failed — manual review needed.'
+  };
+}
 
-  if (callReviews.length === 0) {
-    return {
-      summary: 'No calls were analyzed during this shift.',
-      overallScore: null,
-      recommendation: 'No data available for this shift.'
-    };
+// ─── Daily summary ──────────────────────────────────────────────────────────
+
+async function generateDailySummary(callReviews, shiftDate) {
+  logger.info(`Daily summary: ${shiftDate}, ${callReviews.length} calls`);
+
+  if (!callReviews.length) {
+    return { summary: 'No calls were analyzed during this shift.', overallScore: null, totalCalls: 0 };
   }
+
+  const scores = callReviews.map(r => r.analysis?.score).filter(s => typeof s === 'number');
+  const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+
+  const typeCounts = callReviews.reduce((acc, r) => {
+    const t = r.analysis?.call_type_label || r.analysis?.call_type || 'Unknown';
+    acc[t] = (acc[t] || 0) + 1;
+    return acc;
+  }, {});
 
   const reviewsText = callReviews.map((r, i) => {
     const a = r.analysis || {};
-    return `Call ${i + 1} (${r.direction || 'Unknown'}, ${r.durationSeconds || 0}s):
-  Score: ${a.score ?? 'N/A'}
-  Profanity: ${a.profanity_detected ? 'Yes – ' + (a.profanity_words || []).join(', ') : 'No'}
-  Manners: ${a.manners_rating || 'N/A'}
-  Communication: ${a.communication_rating || 'N/A'}
+    return `Call ${i + 1} [${a.call_type_label || '?'}] (${r.direction || '?'}, ${r.durationSeconds || r.duration_seconds || 0}s):
+  Score: ${a.score ?? 'N/A'} | Tone: ${a.tone_rating || '?'} | Energy: ${a.energy_rating || '?'} | Listening: ${a.listening_rating || '?'}
+  Profanity: ${a.profanity_detected ? 'YES – ' + (a.profanity_words || []).join(', ') : 'No'}
+  Purpose: ${a.call_purpose_clear ? 'Yes' : 'No'} | Next Step: ${a.next_step_given ? 'Yes' : 'No'}
   Review: ${a.short_review || 'N/A'}
+  Violations: ${(a.criteria_violations || []).join('; ') || 'None'}
   Advice: ${a.advice || 'N/A'}`;
   }).join('\n\n');
 
-  const scores = callReviews
-    .map(r => r.analysis?.score)
-    .filter(s => typeof s === 'number');
-  const avgScore = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+  const resp = await openai.chat.completions.create({
+    model: config.openai.analysisModel,
+    messages: [
+      {
+        role: 'system',
+        content: 'You are a professional call center performance coach for American Freight Way / DRENIX. Write a specific, constructive, encouraging end-of-shift summary in English.'
+      },
+      {
+        role: 'user',
+        content: `Shift: ${shiftDate} | Calls: ${callReviews.length} | Types: ${Object.entries(typeCounts).map(([t, n]) => `${t}(${n})`).join(', ')} | Avg: ${avg ?? 'N/A'}/100\n\n${reviewsText}\n\nWrite shift summary:\n1. Overall performance (note the mix of call types)\n2. Strengths by call type\n3. Areas to improve with specific examples\n4. Top 3 action items for next shift\n5. Motivational closing\nBe specific about WHICH call types had issues.`
+      }
+    ],
+    temperature: 0.5,
+    max_tokens: 1400
+  });
 
-  const systemPrompt = `You are a professional call center performance coach. Based on individual call reviews for a work shift, write a comprehensive end-of-shift performance summary for the agent. Be constructive, specific, and encouraging. Write in English.`;
-
-  const userMessage = `Shift Date: ${shiftDate}
-Total Calls Analyzed: ${callReviews.length}
-Average Score: ${avgScore ?? 'N/A'}/100
-
-Individual Call Reviews:
-${reviewsText}
-
-Write a comprehensive shift summary that includes:
-1. Overall performance assessment
-2. Key strengths demonstrated during the shift
-3. Areas needing improvement
-4. Specific action items for the next shift
-5. Encouraging closing remark
-
-Keep it professional, motivating, and practical. Use clear sections.`;
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: config.openai.analysisModel,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage }
-      ],
-      temperature: 0.5,
-      max_tokens: 1200
-    });
-
-    const summaryText = response.choices[0]?.message?.content || 'Summary generation failed.';
-    logger.info('Daily summary generated successfully');
-    return {
-      summary: summaryText,
-      overallScore: avgScore,
-      totalCalls: callReviews.length
-    };
-  } catch (err) {
-    logger.error(`generateDailySummary error: ${err.message}`);
-    throw err;
-  }
+  return {
+    summary: resp.choices[0]?.message?.content || 'Summary generation failed.',
+    overallScore: avg,
+    totalCalls: callReviews.length
+  };
 }
 
-/**
- * Generate a weekly summary from all daily reviews
- */
+// ─── Weekly summary ─────────────────────────────────────────────────────────
+
 async function generateWeeklySummary(dailyReviews, weekStart, weekEnd) {
-  logger.info(`Generating weekly summary for ${weekStart} to ${weekEnd}`);
+  logger.info(`Weekly summary: ${weekStart} → ${weekEnd}`);
 
-  if (dailyReviews.length === 0) {
-    return {
-      summary: 'No data available for this week.',
-      overallScore: null
-    };
+  if (!dailyReviews.length) {
+    return { summary: 'No data for this week.', overallScore: null };
   }
 
-  const reviewsText = dailyReviews.map(r => {
-    return `${r.review_date} (${r.analyzed_calls} calls analyzed, avg score: ${r.avg_score ?? 'N/A'}):
-${r.review_text}
----`;
-  }).join('\n\n');
+  const scores = dailyReviews.filter(r => r.avg_score != null).map(r => r.avg_score);
+  const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
 
-  const avgScore = dailyReviews
-    .filter(r => r.avg_score !== null)
-    .reduce((sum, r, _, arr) => sum + r.avg_score / arr.length, 0);
+  const text = dailyReviews.map(r =>
+    `${r.review_date} (${r.analyzed_calls} calls, avg: ${r.avg_score ?? 'N/A'}/100):\n${r.review_text}\n---`
+  ).join('\n\n');
 
-  const systemPrompt = `You are a professional call center performance coach writing a weekly performance report for an agent. Synthesize the daily reviews into actionable insights and motivating guidance. Write in English.`;
+  const resp = await openai.chat.completions.create({
+    model: config.openai.analysisModel,
+    messages: [
+      {
+        role: 'system',
+        content: 'You are a professional call center performance coach for American Freight Way / DRENIX. Write a comprehensive weekly report covering all call types. Write in English.'
+      },
+      {
+        role: 'user',
+        content: `Week: ${weekStart} → ${weekEnd} | Days: ${dailyReviews.length} | Weekly Avg: ${avg ?? 'N/A'}/100\n\n${text}\n\nWrite weekly report:\n1. Week overview and trend\n2. Performance by call type (first contact, warm outreach, pipeline, check-ins, retention)\n3. Consistent strengths across the week\n4. Recurring issues (patterns across multiple days)\n5. Best day and why\n6. Top 3 focus areas for next week\n7. Weekly rating: Poor / Needs Improvement / Good / Excellent\n8. Motivational closing`
+      }
+    ],
+    temperature: 0.5,
+    max_tokens: 2000
+  });
 
-  const userMessage = `Weekly Performance Report
-Period: ${weekStart} to ${weekEnd}
-Working Days Reviewed: ${dailyReviews.length}
-Overall Weekly Average Score: ${avgScore ? Math.round(avgScore) : 'N/A'}/100
-
-Daily Summaries:
-${reviewsText}
-
-Generate a comprehensive WEEKLY performance report that includes:
-1. Week-at-a-Glance: overall performance trend
-2. Consistent Strengths: what the agent did well all week
-3. Recurring Issues: patterns that appeared across multiple days
-4. Most Improved Day / Best Performance
-5. Focus Areas for Next Week: top 3 specific goals
-6. Weekly Score & Rating (Poor / Needs Improvement / Good / Excellent)
-7. Motivational closing message
-
-Make it structured, thorough, and encouraging.`;
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: config.openai.analysisModel,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage }
-      ],
-      temperature: 0.5,
-      max_tokens: 1800
-    });
-
-    const summaryText = response.choices[0]?.message?.content || 'Weekly summary generation failed.';
-    logger.info('Weekly summary generated');
-    return {
-      summary: summaryText,
-      overallScore: avgScore ? Math.round(avgScore) : null,
-      totalDays: dailyReviews.length
-    };
-  } catch (err) {
-    logger.error(`generateWeeklySummary error: ${err.message}`);
-    throw err;
-  }
+  return {
+    summary: resp.choices[0]?.message?.content || 'Weekly summary failed.',
+    overallScore: avg,
+    totalDays: dailyReviews.length
+  };
 }
 
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-module.exports = {
-  transcribeAudio,
-  analyzeCall,
-  generateDailySummary,
-  generateWeeklySummary,
-  sleep
-};
+module.exports = { transcribeAudio, analyzeCall, generateDailySummary, generateWeeklySummary, sleep };

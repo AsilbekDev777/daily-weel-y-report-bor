@@ -9,8 +9,8 @@ const config = {
   },
   openai: {
     apiKey: process.env.OPENAI_API_KEY,
-    analysisModel: process.env.OPENAI_ANALYSIS_MODEL || 'gpt-4o-mini',
-    transcriptionModel: process.env.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe',
+    analysisModel: process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.5',
+    transcriptionModel: process.env.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-transcribe',
     requestTimeoutMs: parseInt(process.env.OPENAI_REQUEST_TIMEOUT_MS) || 300000,
     delayMs: parseInt(process.env.OPENAI_DELAY_MS) || 5000
   },

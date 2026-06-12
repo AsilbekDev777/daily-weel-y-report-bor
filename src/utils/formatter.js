@@ -2,40 +2,62 @@
 
 const dayjs = require('dayjs');
 
+const CALL_TYPE_ICONS = {
+  first_contact:    '🔵',
+  warm_followup:    '🟡',
+  pipeline_process: '🟠',
+  active_checkin:   '🟢'
+};
+
 /**
  * Format a single call analysis into a Telegram message
  */
 function formatCallReview(call, analysis) {
-  const score = analysis.score ?? 0;
-  const scoreEmoji = getScoreEmoji(score);
-  const profanity = analysis.profanity_detected;
+  const score     = analysis.score ?? 0;
+  const emoji     = getScoreEmoji(score);
+  const typeIcon  = CALL_TYPE_ICONS[analysis.call_type] || '📞';
+  const typeLabel = analysis.call_type_label || callTypeLabel(analysis.call_type);
 
-  let msg = `📞 *Call Review*\n`;
-  msg += `🕐 ${formatTime(call.start_time)} | ⏱ ${formatDuration(call.durationSeconds)}\n`;
-  msg += `📊 Score: *${score}/100* ${scoreEmoji}\n\n`;
+  let msg = `${typeIcon} *${typeLabel}*\n`;
+  msg += `🕐 ${formatTime(call.start_time)} | ⏱ ${formatDuration(call.durationSeconds || call.duration_seconds)}\n`;
+  msg += `📊 Score: *${score}/100* ${emoji}\n`;
 
-  if (profanity && analysis.profanity_words && analysis.profanity_words.length > 0) {
-    msg += `🚫 *Profanity Detected!*\n`;
-    msg += `Words used: \`${analysis.profanity_words.join(', ')}\`\n\n`;
+  if (analysis.profanity_detected && analysis.profanity_words?.length) {
+    msg += `\n🚫 *Profanity Detected:* \`${analysis.profanity_words.join(', ')}\`\n`;
   }
 
-  msg += `📋 *Manners:* ${analysis.manners_rating || 'N/A'}\n`;
-  msg += `💬 *Communication:* ${analysis.communication_rating || 'N/A'}\n\n`;
+  msg += `\n📋 Manners: *${analysis.manners_rating || 'N/A'}*\n`;
+  msg += `💬 Communication: *${analysis.communication_rating || 'N/A'}*\n`;
+  msg += `🎙 Tone: *${analysis.tone_rating || 'N/A'}*\n`;
+  msg += `👂 Listening: *${analysis.listening_rating || 'N/A'}*\n`;
+  msg += `⚡ Energy: *${analysis.energy_rating || 'N/A'}*\n`;
+
+  const purposeIcon = analysis.call_purpose_clear ? '✅' : '❌';
+  const stepIcon    = analysis.next_step_given    ? '✅' : '❌';
+  msg += `\n${purposeIcon} Purpose stated clearly\n`;
+  msg += `${stepIcon} Next step given at end\n`;
+
+  if (analysis.criteria_violations?.length) {
+    msg += `\n⚠️ *Standards violated:*\n`;
+    analysis.criteria_violations.slice(0, 3).forEach(v => {
+      msg += `  • ${v}\n`;
+    });
+  }
 
   if (analysis.behavior_summary) {
-    msg += `📝 *Summary:*\n${analysis.behavior_summary}\n\n`;
+    msg += `\n📝 *Summary:*\n${analysis.behavior_summary}\n`;
   }
 
-  if (analysis.strengths && analysis.strengths !== 'None identified') {
-    msg += `✅ *Strengths:*\n${analysis.strengths}\n\n`;
+  if (analysis.strengths && analysis.strengths !== 'N/A' && analysis.strengths !== 'None identified') {
+    msg += `\n✅ *Strengths:*\n${analysis.strengths}\n`;
   }
 
-  if (analysis.weaknesses && analysis.weaknesses !== 'None identified') {
-    msg += `⚠️ *Needs Improvement:*\n${analysis.weaknesses}\n\n`;
+  if (analysis.weaknesses && analysis.weaknesses !== 'N/A' && analysis.weaknesses !== 'None identified') {
+    msg += `\n⚠️ *Needs Improvement:*\n${analysis.weaknesses}\n`;
   }
 
-  if (analysis.advice) {
-    msg += `💡 *Advice:*\n${analysis.advice}`;
+  if (analysis.advice && analysis.advice !== 'N/A') {
+    msg += `\n💡 *Advice:*\n${analysis.advice}`;
   }
 
   return msg;
@@ -46,14 +68,13 @@ function formatCallReview(call, analysis) {
  */
 function formatDailySummary(date, result) {
   const score = result.overallScore;
-  const scoreEmoji = score !== null ? getScoreEmoji(score) : '📊';
+  const emoji = score !== null ? getScoreEmoji(score) : '📊';
 
-  let msg = `🏁 *End of Shift Report*\n`;
-  msg += `📅 Date: ${date}\n`;
-  msg += `📞 Calls Analyzed: ${result.totalCalls || 0}\n`;
+  let msg = `🏁 *End of Shift Report – ${date}*\n`;
+  msg += `📞 Calls Analyzed: *${result.totalCalls || 0}*\n`;
 
   if (score !== null) {
-    msg += `⭐ Overall Score: *${score}/100* ${scoreEmoji}\n`;
+    msg += `⭐ Average Score: *${score}/100* ${emoji}\n`;
   }
 
   msg += `\n${result.summary}`;
@@ -65,19 +86,21 @@ function formatDailySummary(date, result) {
  */
 function formatWeeklySummary(weekStart, weekEnd, result) {
   const score = result.overallScore;
-  const scoreEmoji = score !== null ? getScoreEmoji(score) : '📊';
+  const emoji = score !== null ? getScoreEmoji(score) : '📊';
 
   let msg = `📅 *Weekly Performance Report*\n`;
   msg += `🗓 Period: ${weekStart} → ${weekEnd}\n`;
-  msg += `📆 Days Reviewed: ${result.totalDays || 0}\n`;
+  msg += `📆 Days Reviewed: *${result.totalDays || 0}*\n`;
 
   if (score !== null) {
-    msg += `🏆 Weekly Average: *${score}/100* ${scoreEmoji}\n`;
+    msg += `🏆 Weekly Average: *${score}/100* ${emoji}\n`;
   }
 
   msg += `\n${result.summary}`;
   return msg;
 }
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getScoreEmoji(score) {
   if (score >= 90) return '🌟';
@@ -85,6 +108,16 @@ function getScoreEmoji(score) {
   if (score >= 60) return '🟡';
   if (score >= 40) return '🟠';
   return '🔴';
+}
+
+function callTypeLabel(type) {
+  const labels = {
+    first_contact:    'First Contact Call',
+    warm_followup:    'Warm Follow-Up Call',
+    pipeline_process: 'Pipeline / Process Call',
+    active_checkin:   'Active Driver Check-In'
+  };
+  return labels[type] || 'Call Review';
 }
 
 function formatTime(isoString) {
@@ -99,9 +132,6 @@ function formatDuration(seconds) {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-/**
- * Split a long message into Telegram-safe chunks (max 4096 chars)
- */
 function splitMessage(text, maxLen = 4000) {
   if (text.length <= maxLen) return [text];
   const chunks = [];
@@ -123,5 +153,6 @@ module.exports = {
   formatCallReview,
   formatDailySummary,
   formatWeeklySummary,
-  splitMessage
+  splitMessage,
+  getScoreEmoji
 };

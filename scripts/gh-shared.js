@@ -557,7 +557,7 @@ async function compressTranscriptGh(transcription, openaiClient, model) {
       model, messages: [
         { role: "system", content: prompt },
         { role: "user",   content: `Transcript (${words} words):\n---\n${transcription}\n---` }
-      ], temperature: 0.1, max_tokens: 1200
+      ], max_completion_tokens: 1200
     });
     const compressed = resp.choices[0]?.message?.content || transcription.slice(0, 8000);
     log.info(`Compressed: ${words} → ${compressed.trim().split(/\s+/).length} words`);
@@ -824,8 +824,7 @@ SCORING RANGES (apply to all types):
   try {
     const resp = await openai.chat.completions.create({
       model: config.openai.analysisModel,
-      messages: [{ role:"system", content:SYSTEM }, { role:"user", content:USER }],
-      temperature: 0.3, max_tokens: 1500
+      messages: [{ role:"system", content:SYSTEM }, { role:"user", content:USER }], max_completion_tokens: 1500
     });
     const raw = resp.choices[0]?.message?.content || "{}";
     try { return JSON.parse(raw.replace(/```json|```/g,"").trim()); }
@@ -847,7 +846,6 @@ function ghFallback(reason) {
   };
 }
 
-
 async function generateDailySummary(calls, date) {
   if (!calls.length) return { summary: 'No calls analyzed during this shift.', overallScore: null, totalCalls: 0 };
   const scores = calls.map(c => c.analysis?.score).filter(s => typeof s === 'number');
@@ -861,8 +859,7 @@ async function generateDailySummary(calls, date) {
     messages: [
       { role:'system', content:'You are a professional call center performance coach. Write a constructive, specific, encouraging end-of-shift summary in English.' },
       { role:'user',   content:`Shift: ${date}\nCalls: ${calls.length}\nAvg Score: ${avg??'N/A'}/100\n\n${reviewsText}\n\nWrite a shift summary: overall assessment, key strengths, areas to improve, 3 action items for next shift, motivational closing.` }
-    ],
-    temperature: 0.5, max_tokens: 1200
+    ], max_completion_tokens: 1200
   });
   return { summary: resp.choices[0]?.message?.content || 'Generation failed.', overallScore: avg, totalCalls: calls.length };
 }
@@ -877,8 +874,7 @@ async function generateWeeklySummary(dailyReviews, weekStart, weekEnd) {
     messages: [
       { role:'system', content:'You are a professional call center performance coach writing a weekly performance report. Write in English.' },
       { role:'user',   content:`Week: ${weekStart} → ${weekEnd}\nDays: ${dailyReviews.length}\nWeekly Avg: ${avg??'N/A'}/100\n\nDaily summaries:\n${text}\n\nWrite a weekly report: week overview, consistent strengths, recurring issues, best day, top 3 goals for next week, weekly rating, motivational close.` }
-    ],
-    temperature: 0.5, max_tokens: 1800
+    ], max_completion_tokens: 1800
   });
   return { summary: resp.choices[0]?.message?.content || 'Generation failed.', overallScore: avg, totalDays: dailyReviews.length };
 }

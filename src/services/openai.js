@@ -73,8 +73,7 @@ Total: 300-500 words. Exact quotes only.`;
         { role: 'system', content: prompt },
         { role: 'user', content: `Transcript (${words} words):\n---\n${transcription}\n---` }
       ],
-      temperature: 0.1,
-      max_tokens: 1200
+      max_completion_tokens: 1200
     });
     const compressed = resp.choices[0]?.message?.content || transcription.slice(0, 8000);
     logger.info(`Compressed: ${words} → ${compressed.trim().split(/\s+/).length} words`);
@@ -160,8 +159,7 @@ STEP 3 — Respond ONLY with valid JSON, no markdown:
         { role: 'system', content: SYSTEM },
         { role: 'user',   content: USER }
       ],
-      temperature: 0.3,
-      max_tokens: 1500
+      max_completion_tokens: 1500
     });
 
     const raw = response.choices[0]?.message?.content || '{}';
@@ -245,8 +243,7 @@ async function generateDailySummary(callReviews, shiftDate) {
         content: `Shift: ${shiftDate} | Calls: ${callReviews.length} | Types: ${Object.entries(typeCounts).map(([t, n]) => `${t}(${n})`).join(', ')} | Avg: ${avg ?? 'N/A'}/100\n\n${reviewsText}\n\nWrite shift summary:\n1. Overall performance (note the mix of call types)\n2. Strengths by call type\n3. Areas to improve with specific examples\n4. Top 3 action items for next shift\n5. Motivational closing\nBe specific about WHICH call types had issues.`
       }
     ],
-    temperature: 0.5,
-    max_tokens: 1400
+    max_completion_tokens: 1400
   });
 
   return {
@@ -284,8 +281,7 @@ async function generateWeeklySummary(dailyReviews, weekStart, weekEnd) {
         content: `Week: ${weekStart} → ${weekEnd} | Days: ${dailyReviews.length} | Weekly Avg: ${avg ?? 'N/A'}/100\n\n${text}\n\nWrite weekly report:\n1. Week overview and trend\n2. Performance by call type (first contact, warm outreach, pipeline, check-ins, retention)\n3. Consistent strengths across the week\n4. Recurring issues (patterns across multiple days)\n5. Best day and why\n6. Top 3 focus areas for next week\n7. Weekly rating: Poor / Needs Improvement / Good / Excellent\n8. Motivational closing`
       }
     ],
-    temperature: 0.5,
-    max_tokens: 2000
+    max_completion_tokens: 2000
   });
 
   return {
